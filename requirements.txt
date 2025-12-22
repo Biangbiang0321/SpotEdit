@@ -1,3 +1,6 @@
 diffusers
 torch
 numpy
+sentencepiece
+jupyter
+transformers

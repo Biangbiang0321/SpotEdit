@@ -9,7 +9,7 @@
 <br>
 
 > **SpotEdit: Selective Region Editing in Diffusion Transformers**  
-> 🖌️ [[arXiv]](https://arxiv.org/abs/XXXX.XXXXX)  
+> 🖌️ [[arXiv]](https://arxiv.org/abs/XXXXX)  
 >  
 > Zhibin Qin<sup>1</sup>, Zhenxiong Tan<sup>1</sup>, Zeqing Wang<sup>1</sup>, Songhua Liu<sup>2</sup>, Xinchao Wang<sup>1</sup>  
 > <sup>1</sup> National University of Singapore  
@@ -25,7 +25,7 @@ SpotEdit dynamically identifies **non-edited regions** during the diffusion proc
   <img src="asset/pipeline.jpg" width="70%" ></img>
   <br>
   <em>
-      The overview of SpotEdit
+      The overview of SpotEdit pipeline
   </em>
 </div>
 <br>
@@ -59,11 +59,11 @@ pip install -r requirements.txt
 <br>
 
 ## Ciatation
+
+```bibtex
 @misc{qin2026spotedit,
   title        = {SpotEdit: Selective Region Editing in Diffusion Transformers},
   author       = {Qin, Zhibin and Tan, Zhenxiong and Wang, Zeqing and Liu, Songhua and Wang, Xinchao},
-  year         = {2026},
-  eprint       = {XXXX.XXXXX},
-  archivePrefix= {arXiv},
-  primaryClass = {cs.CV}
+  journal={arXiv preprint arXiv:XXXXXX}
 }
+```
