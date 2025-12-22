@@ -1,6 +1,6 @@
 # SpotEdit: Selective Region Editing in Diffusion Transformers
 <div align="center">
-  <img src="assets/result.jpg" width="70%" ></img>
+  <img src="asset/result.jpg" width="70%" ></img>
   <br>
   <em>
       Examples of edited images by SpotEdit. The blue area reveals the regenerated region
@@ -22,7 +22,7 @@ While most image editing tasks only modify small local regions, existing diffusi
 SpotEdit dynamically identifies **non-edited regions** during the diffusion process and skips unnecessary computation for these regions, while maintaining contextual coherence for edited regions through adaptive feature fusion. 
 
 <div align="center">
-  <img src="assets/pipeline.jpg" width="70%" ></img>
+  <img src="asset/pipeline.jpg" width="70%" ></img>
   <br>
   <em>
       The overview of SpotEdit
@@ -50,7 +50,7 @@ pip install -r requirements.txt
 
 ## Generated samples  
 <div align="center">
-  <img src="assets/more_results.jpg" width="70%" ></img>
+  <img src="asset/more_results.jpg" width="70%" ></img>
   <br>
   <em>
       more results of SpotEdit 
