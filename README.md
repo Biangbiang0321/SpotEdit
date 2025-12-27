@@ -7,9 +7,10 @@
   </em>
 </div>
 <br>
+<a href="https://biangbiang0321.github.io/SpotEdit.github.io/"><img src="https://img.shields.io/badge/Web-Project Page-1d72b8.svg" alt="Project Page"></a>
+<a href="#"><img src="https://img.shields.io/badge/arXiv-ViBT-A42C25.svg" alt="arXiv"></a>
 
 > **SpotEdit: Selective Region Editing in Diffusion Transformers**  
-> 🖌️ [[arXiv]](https://arxiv.org/abs/XXXXX)  
 >  
 > Zhibin Qin<sup>1</sup>, Zhenxiong Tan<sup>1</sup>, Zeqing Wang<sup>1</sup>, Songhua Liu<sup>2</sup>, Xinchao Wang<sup>1</sup>  
 > <sup>1</sup> National University of Singapore  
@@ -61,9 +62,10 @@ pip install -r requirements.txt
 ## Ciatation
 
 ```bibtex
-@misc{qin2025spotedit,
+@artical{qin2025spotedit,
   title        = {SpotEdit: Selective Region Editing in Diffusion Transformers},
   author       = {Qin, Zhibin and Tan, Zhenxiong and Wang, Zeqing and Liu, Songhua and Wang, Xinchao},
-  journal={arXiv preprint arXiv:XXXXXX}
+  journal={arXiv preprint arXiv:XXXXXX},
+  year={2025}
 }
 ```
