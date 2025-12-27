@@ -4,3 +4,5 @@ numpy
 sentencepiece
 jupyter
 transformers
+protobuf
+torchvision
