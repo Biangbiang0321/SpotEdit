@@ -63,9 +63,9 @@ pip install -r requirements.txt
 
 ```bibtex
 @artical{qin2025spotedit,
-  title        = {SpotEdit: Selective Region Editing in Diffusion Transformers},
-  author       = {Qin, Zhibin and Tan, Zhenxiong and Wang, Zeqing and Liu, Songhua and Wang, Xinchao},
-  journal={arXiv preprint arXiv:XXXXXX},
+  title= {SpotEdit: Selective Region Editing in Diffusion Transformers},
+  author= {Qin, Zhibin and Tan, Zhenxiong and Wang, Zeqing and Liu, Songhua and Wang, Xinchao},
+  journal={arXiv preprint},
   year={2025}
 }
 ```
