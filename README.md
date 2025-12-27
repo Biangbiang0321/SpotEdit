@@ -61,7 +61,7 @@ pip install -r requirements.txt
 ## Ciatation
 
 ```bibtex
-@misc{qin2026spotedit,
+@misc{qin2025spotedit,
   title        = {SpotEdit: Selective Region Editing in Diffusion Transformers},
   author       = {Qin, Zhibin and Tan, Zhenxiong and Wang, Zeqing and Liu, Songhua and Wang, Xinchao},
   journal={arXiv preprint arXiv:XXXXXX}

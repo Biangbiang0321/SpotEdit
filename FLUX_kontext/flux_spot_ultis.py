@@ -24,7 +24,7 @@ class SpotEditConfig:
     judge_method: str = "LPIPS"
     initial_steps: int = 4
     reset_steps: list = field(default_factory=lambda: [13, 22, 31])
-    dilation_radius: int = 1
+    dilation_radius: int = 0
     
 
 def SpotSelect(self, x0_pred, image_latents, threshold=0.1, method='L4', metric=None):

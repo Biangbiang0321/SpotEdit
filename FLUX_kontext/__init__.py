@@ -9,7 +9,7 @@ Main Usage:
 """
 
 
-from .flux_kontext_spotedit import generate
+from .flux_spotedit import generate
 from .flux_spot_ultis import SpotEditConfig
 
 __all__ = [

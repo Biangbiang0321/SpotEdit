@@ -179,8 +179,8 @@ def generate(
                     if config.dilation_radius > 0:
                         cache_flags[1] = dilate_uncached_mask(
                             cache_flags[1],
-                            H_lat=height // self.vae_scale_factor,
-                            W_lat=width // self.vae_scale_factor,
+                            H_lat=height // self.vae_scale_factor // 2,
+                            W_lat=width // self.vae_scale_factor // 2,
                             dilation_radius=config.dilation_radius,
                         )
 

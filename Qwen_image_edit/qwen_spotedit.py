@@ -242,7 +242,7 @@ def generate(
                 ac = 0
                 ac += 1
             else:
-                if ac % 1 == 0:
+                if ac == 1:
                     if len(x0_preds):
                         reuse = Spotselect(self, x0_preds[-1], image_latents, threshold=config.threshold, method=config.judge_method)
                     #dilate for stable results
