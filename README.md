@@ -65,7 +65,7 @@ pip install -r requirements.txt
 @artical{qin2025spotedit,
   title= {SpotEdit: Selective Region Editing in Diffusion Transformers},
   author= {Qin, Zhibin and Tan, Zhenxiong and Wang, Zeqing and Liu, Songhua and Wang, Xinchao},
-  journal={arXiv preprint},
+  journal={arXiv preprint arXiv:2512.22323},
   year={2025}
 }
 ```
