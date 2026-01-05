@@ -17,7 +17,7 @@
 > <sup>2</sup> Shanghai Jiao Tong University  
 
 ## 📚 Overview
-**SpotEdit** is a **training-free, region-aware acceleration framework** for instruction-based image editing with **Diffusion Transformers (DiTs)**.  
+**SpotEdit** is a **training-free, region-aware framework** for instruction-based image editing with **Diffusion Transformers (DiTs)**.  
 While most image editing tasks only modify small local regions, existing diffusion-based editors regenerate the entire image at every denoising step, leading to redundant computation and potential degradation in preserved areas. SpotEdit follows a simple principle: **edit only what needs to be edited**.
 
 SpotEdit dynamically identifies **non-edited regions** during the diffusion process and skips unnecessary computation for these regions, while maintaining contextual coherence for edited regions through adaptive feature fusion. 
