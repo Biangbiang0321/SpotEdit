@@ -1,0 +1,7 @@
+# generated experiment outputs (regenerable) and caches
+eval/results/
+eval/logs/
+__pycache__/
+*.pyc
+*.log
+*.tmp
