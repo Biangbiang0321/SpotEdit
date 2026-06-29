@@ -1,7 +1,14 @@
-# generated experiment outputs (regenerable) and caches
+# --- generated experiment outputs (regenerable) + caches ---
 eval/results/
 eval/logs/
 __pycache__/
 *.pyc
 *.log
 *.tmp
+
+# --- dev / eval scripts + study docs: keep the GitHub release clean ---
+# (all top-level scripts; module library code under */*.py is still tracked)
+/*.py
+SPOTEDIT_TESTING_NOTES.md
+LPIPS_SPEED_STUDY.md
+CHANGES.md
