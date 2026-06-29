@@ -12,7 +12,7 @@ from diffusers.models.transformers.transformer_flux import (
     dispatch_attention_fn,
 )
 import torch.nn.functional as F
-from FLUXLPIPS import FLUXVAETokenLPIPS
+from .FLUXLPIPS import FLUXVAETokenLPIPS
 
 from dataclasses import dataclass ,field
 
@@ -27,7 +27,8 @@ class SpotEditConfig:
     dilation_radius: int = 0
     
 
-def SpotSelect(self, x0_pred, image_latents, threshold=0.1, method='L4', metric=None):
+def SpotSelect(self, x0_pred, image_latents, threshold=0.1, method='L4', metric=None,
+               image_size=(1024, 1024)):
     if method == 'L4':
         delta = x0_pred - image_latents
         mean_delta = (delta.abs()**4).mean(dim=-1).mean(dim=0)
@@ -45,11 +46,11 @@ def SpotSelect(self, x0_pred, image_latents, threshold=0.1, method='L4', metric=
         if not hasattr(self, 'metric') or self.metric is None:      
             self.metric = FLUXVAETokenLPIPS(self.vae)
         if self.metric._z2_cached is None:
-            self.metric.set_z2_cache(image_latents, image_size=(1024, 1024), vae_downsample_factor=8)
+            self.metric.set_z2_cache(image_latents, image_size=image_size, vae_downsample_factor=8)
         token_scores = self.metric(
             x0_pred, image_latents,
-            image_size=(1024, 1024),
-            vae_downsample_factor=8,   
+            image_size=image_size,
+            vae_downsample_factor=8,
         )
         reuse = token_scores.mean(dim=0) < threshold
         return reuse

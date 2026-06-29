@@ -196,158 +196,162 @@ def generate(
     ]
     cache_flags.append(0)
     
+    # remember the original processors so we can restore them on exit (otherwise a later
+    # plain pipe() call would run with leftover SpotEdit processors + stale cache state).
+    _orig_procs = [(name, module.processor) for name, module in self.transformer.named_modules()
+                   if isinstance(module, Attention)]
     for _, module in self.transformer.named_modules():
         if isinstance(module, Attention):
             module.set_processor(QwenSpotEditAttnProcessor(cache_flags))
 
-    if self.attention_kwargs is None:
-        self._attention_kwargs = {}
+    try:
+        if self.attention_kwargs is None:
+            self._attention_kwargs = {}
 
-    txt_seq_lens = prompt_embeds_mask.sum(dim=1).tolist() if prompt_embeds_mask is not None else None
-    negative_txt_seq_lens = (
-        negative_prompt_embeds_mask.sum(dim=1).tolist() if negative_prompt_embeds_mask is not None else None
-    )
-
-    # 6. Denoising loop
-    self.scheduler.set_begin_index(0)
-
-
-    x0_preds = []
-    last_noise_pred = None
-
-
-    
-
-    reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
-    cache_final=torch.zeros(
-        (latent_n), dtype=torch.bool, device=device
-    )
-    total_cached_tokens, total_latent_tokens = 0, 0
-    ac = 0
-    with self.progress_bar(total=num_inference_steps) as progress_bar:
-        for i, t in enumerate(timesteps):
-            if self.interrupt:
-                continue
-            
-
-
-            if i < config.initial_steps or i in config.reset_steps:
-                cache_flags[1] = torch.zeros(
-                    (latent_n), dtype=torch.bool, device = device
-                )
-                cache_flags[2] = torch.zeros(
-                    (image_n),dtype = torch.bool , device = device
-                )
-                reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
-                ac = 0
-                ac += 1
-            else:
-                if ac == 1:
-                    if len(x0_preds):
-                        reuse = Spotselect(self, x0_preds[-1], image_latents, threshold=config.threshold, method=config.judge_method)
-                    #dilate for stable results
-                    H_lat = height // self.vae_scale_factor // 2
-                    W_lat = width // self.vae_scale_factor // 2
-                    cache_flags[1] = dilate_uncached_mask(reuse, H_lat, W_lat, dilation_radius=config.dilation_radius)
-                    if cache_flags[1].any():
-                        cache_final = cache_flags[1]
-                        cache_flags[2] = torch.ones(
-                            (image_n),dtype = torch.bool ,device = device
-                        )
-                    else:
-                        cache_flags[2] = torch.zeros(
-                            (image_n),dtype = torch.bool , device = device
-                        )
-                ac += 1
-            cache_flags[-1] = t.item() / 1000
-
-            cached_token_n = cache_flags[1].sum().item()
-            total_cached_tokens += cached_token_n
-            total_latent_tokens += latent_n
-
-            self._current_timestep = t
-
-
-            uncached_latents = latents[:, cache_flags[1].logical_not()]
-
-            latent_model_input = latents
-            if image_latents is not None:
-                uncached_image_latents = image_latents[:,cache_flags[2].logical_not()]
-                latent_model_input = torch.cat([uncached_latents, uncached_image_latents], dim=1)
-            else:
-                latent_model_input = uncached_latents
-
-            
-            # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-            timestep = t.expand(latents.shape[0]).to(latents.dtype)
-
-            with self.transformer.cache_context("cond"):
-                noise_pred = self.transformer(
-                    hidden_states=latent_model_input,
-                    timestep=timestep / 1000,
-                    guidance=guidance,
-                    encoder_hidden_states_mask=prompt_embeds_mask,
-                    encoder_hidden_states=prompt_embeds,
-                    img_shapes=img_shapes,
-                    txt_seq_lens=txt_seq_lens,
-                    attention_kwargs=self.attention_kwargs,
-                    return_dict=False,
-                )[0]
-            #update the noise prediction only for edited tokens
-            if cache_flags[1].any():
-                uncached_n = cache_flags[1].logical_not().sum().item()
-                noisy_copy = last_noise_pred.clone()
-                noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
-                noise_pred = noisy_copy
-            else:
-                noise_pred = noise_pred[:, : latents.size(1)]
-
-            last_noise_pred = noise_pred
-
-            x0_preds.append(latents - t.item() / 1000 * noise_pred)
-
-
-            # compute the previous noisy sample x_t -> x_t-1
-            latents_dtype = latents.dtype
-            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-
-            if latents.dtype != latents_dtype:
-                if torch.backends.mps.is_available():
-                    # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
-                    latents = latents.to(latents_dtype)
-
-            if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
-                progress_bar.update()
-
-            if XLA_AVAILABLE:
-                xm.mark_step()
-
-    self._current_timestep = None
-    # For non-edited tokens, we explicitly overwrite the generated latents with the original latents
-    # if cache_final.any():
-    #     latents[:, cache_final] = image_latents[:, cache_final]
-    print('updated')
-    if output_type == "latent":
-        image = latents
-    else:
-        latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
-        latents = latents.to(self.vae.dtype)
-        latents_mean = (
-            torch.tensor(self.vae.config.latents_mean)
-            .view(1, self.vae.config.z_dim, 1, 1, 1)
-            .to(latents.device, latents.dtype)
+        txt_seq_lens = prompt_embeds_mask.sum(dim=1).tolist() if prompt_embeds_mask is not None else None
+        negative_txt_seq_lens = (
+            negative_prompt_embeds_mask.sum(dim=1).tolist() if negative_prompt_embeds_mask is not None else None
         )
-        latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
-            latents.device, latents.dtype
+
+        # 6. Denoising loop
+        self.scheduler.set_begin_index(0)
+
+
+        x0_preds = []
+        last_noise_pred = None
+
+        reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
+        cache_final=torch.zeros(
+            (latent_n), dtype=torch.bool, device=device
         )
-        latents = latents / latents_std + latents_mean
-        image = self.vae.decode(latents, return_dict=False)[0][:, :, 0]
-        image = self.image_processor.postprocess(image, output_type=output_type)
+        total_cached_tokens, total_latent_tokens = 0, 0
+        ac = 0
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                if self.interrupt:
+                    continue
 
-    # Offload all models
-    self.maybe_free_model_hooks()
+                if i < config.initial_steps or i in config.reset_steps:
+                    cache_flags[1] = torch.zeros(
+                        (latent_n), dtype=torch.bool, device = device
+                    )
+                    cache_flags[2] = torch.zeros(
+                        (image_n),dtype = torch.bool , device = device
+                    )
+                    reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
+                    ac = 0
+                    ac += 1
+                else:
+                    if ac == 1:
+                        if len(x0_preds):
+                            reuse = Spotselect(self, x0_preds[-1], image_latents, threshold=config.threshold, method=config.judge_method, image_size=(height, width))
+                        #dilate for stable results
+                        H_lat = height // self.vae_scale_factor // 2
+                        W_lat = width // self.vae_scale_factor // 2
+                        cache_flags[1] = dilate_uncached_mask(reuse, H_lat, W_lat, dilation_radius=config.dilation_radius)
+                        if cache_flags[1].any():
+                            cache_final = cache_flags[1]
+                            cache_flags[2] = torch.ones(
+                                (image_n),dtype = torch.bool ,device = device
+                            )
+                        else:
+                            cache_flags[2] = torch.zeros(
+                                (image_n),dtype = torch.bool , device = device
+                            )
+                    ac += 1
+                cache_flags[-1] = t.item() / 1000
 
-    if not return_dict:
-        return (image,)
+                cached_token_n = cache_flags[1].sum().item()
+                total_cached_tokens += cached_token_n
+                total_latent_tokens += latent_n
 
-    return QwenImagePipelineOutput(images=image)
+                self._current_timestep = t
+
+
+                uncached_latents = latents[:, cache_flags[1].logical_not()]
+
+                latent_model_input = latents
+                if image_latents is not None:
+                    uncached_image_latents = image_latents[:,cache_flags[2].logical_not()]
+                    latent_model_input = torch.cat([uncached_latents, uncached_image_latents], dim=1)
+                else:
+                    latent_model_input = uncached_latents
+
+
+                # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
+                timestep = t.expand(latents.shape[0]).to(latents.dtype)
+
+                with self.transformer.cache_context("cond"):
+                    noise_pred = self.transformer(
+                        hidden_states=latent_model_input,
+                        timestep=timestep / 1000,
+                        guidance=guidance,
+                        encoder_hidden_states_mask=prompt_embeds_mask,
+                        encoder_hidden_states=prompt_embeds,
+                        img_shapes=img_shapes,
+                        txt_seq_lens=txt_seq_lens,
+                        attention_kwargs=self.attention_kwargs,
+                        return_dict=False,
+                    )[0]
+                #update the noise prediction only for edited tokens
+                if cache_flags[1].any():
+                    uncached_n = cache_flags[1].logical_not().sum().item()
+                    noisy_copy = last_noise_pred.clone()
+                    noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
+                    noise_pred = noisy_copy
+                else:
+                    noise_pred = noise_pred[:, : latents.size(1)]
+
+                last_noise_pred = noise_pred
+
+                x0_preds.append(latents - t.item() / 1000 * noise_pred)
+
+
+                # compute the previous noisy sample x_t -> x_t-1
+                latents_dtype = latents.dtype
+                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
+                if latents.dtype != latents_dtype:
+                    if torch.backends.mps.is_available():
+                        # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
+                        latents = latents.to(latents_dtype)
+
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                    progress_bar.update()
+
+                if XLA_AVAILABLE:
+                    xm.mark_step()
+
+        self._current_timestep = None
+        # For non-edited tokens, we explicitly overwrite the generated latents with the original latents
+        # if cache_final.any():
+        #     latents[:, cache_final] = image_latents[:, cache_final]
+        print('updated')
+        if output_type == "latent":
+            image = latents
+        else:
+            latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+            latents = latents.to(self.vae.dtype)
+            latents_mean = (
+                torch.tensor(self.vae.config.latents_mean)
+                .view(1, self.vae.config.z_dim, 1, 1, 1)
+                .to(latents.device, latents.dtype)
+            )
+            latents_std = 1.0 / torch.tensor(self.vae.config.latents_std).view(1, self.vae.config.z_dim, 1, 1, 1).to(
+                latents.device, latents.dtype
+            )
+            latents = latents / latents_std + latents_mean
+            image = self.vae.decode(latents, return_dict=False)[0][:, :, 0]
+            image = self.image_processor.postprocess(image, output_type=output_type)
+
+        # Offload all models
+        self.maybe_free_model_hooks()
+
+        if not return_dict:
+            return (image,)
+
+        return QwenImagePipelineOutput(images=image)
+    finally:
+        # restore the original attention processors so the pipe is left unmodified
+        for name, proc in _orig_procs:
+            self.transformer.get_submodule(name).set_processor(proc)

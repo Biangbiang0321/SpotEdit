@@ -12,8 +12,8 @@ from diffusers.pipelines.flux.pipeline_flux_kontext import (
 from diffusers.models.transformers.transformer_flux import (
     FluxAttention,
 )
-from flux_spot_ultis import SpotEditConfig, SpotSelect, boundary_aware_smoothing, dilate_uncached_mask
-from fluxSpotAttn import SpotFusionAttnProcessor
+from .flux_spot_ultis import SpotEditConfig, SpotSelect, boundary_aware_smoothing, dilate_uncached_mask
+from .fluxSpotAttn import SpotFusionAttnProcessor
 
 @torch.no_grad()
 def generate(
@@ -30,6 +30,8 @@ def generate(
     _auto_resize: bool = True,
     config: Optional[SpotEditConfig] = None,
 ):
+    if config is None:
+        config = SpotEditConfig()
 
     height = height or self.default_sample_size * self.vae_scale_factor
     width = width or self.default_sample_size * self.vae_scale_factor
@@ -146,124 +148,129 @@ def generate(
         for n in [text_n, latent_n, image_n]
     ]
     cache_flags.append(0)
+    # remember the original processors so we can restore them on exit (otherwise a later
+    # plain pipe() call would run with leftover SpotEdit processors + stale cache state).
+    _orig_procs = [(name, module.processor) for name, module in self.transformer.named_modules()
+                   if isinstance(module, FluxAttention)]
     for _, module in self.transformer.named_modules():
         if isinstance(module, FluxAttention):
             module.set_processor(SpotFusionAttnProcessor(cache_flags))
 
-    # 6. Denoising loop
-    # We set the index here to remove DtoH sync, helpful especially during compilation.
-    # Check out more details here: https://github.com/huggingface/diffusers/pull/11696
-    self.scheduler.set_begin_index(0)
+    try:
+        # 6. Denoising loop
+        # We set the index here to remove DtoH sync, helpful especially during compilation.
+        # Check out more details here: https://github.com/huggingface/diffusers/pull/11696
+        self.scheduler.set_begin_index(0)
 
-    x0_preds = []
-    last_noise_pred = None
-    reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
-    cache_final = torch.zeros((latent_n), dtype=torch.bool, device=device)
+        x0_preds = []
+        last_noise_pred = None
+        reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
+        cache_final = torch.zeros((latent_n), dtype=torch.bool, device=device)
 
-    total_cached_tokens, total_latent_tokens = 0, 0
+        total_cached_tokens, total_latent_tokens = 0, 0
 
-    with self.progress_bar(total=num_inference_steps) as progress_bar:
-        for i, t in enumerate(timesteps):
-            if len(x0_preds):
-                #for the initial and reset steps, we do full computation
-                if i in config.reset_steps or i < config.initial_steps:
-                    cache_flags[1] = torch.zeros(
-                        (latent_n), dtype=torch.bool, device=device
-                    )
-                    cache_flags[2] = torch.zeros(
-                        (image_n), dtype=torch.bool, device=device
-                    )
-                #for spotedit steps, we do selective computation
-                else:
-                    cache_flags[1] = SpotSelect(self, x0_preds[-1], image_latents, threshold=config.threshold, method=config.judge_method)
-                    if config.dilation_radius > 0:
-                        cache_flags[1] = dilate_uncached_mask(
-                            cache_flags[1],
-                            H_lat=height // self.vae_scale_factor // 2,
-                            W_lat=width // self.vae_scale_factor // 2,
-                            dilation_radius=config.dilation_radius,
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                if len(x0_preds):
+                    #for the initial and reset steps, we do full computation
+                    if i in config.reset_steps or i < config.initial_steps:
+                        cache_flags[1] = torch.zeros(
+                            (latent_n), dtype=torch.bool, device=device
                         )
-
-                    if cache_flags[1].any():
-                        cache_final = cache_flags[1]
-                        cache_flags[2] = torch.ones(
-                            (image_n), dtype=torch.bool, device=device
-                        )
-                    else:
                         cache_flags[2] = torch.zeros(
                             (image_n), dtype=torch.bool, device=device
                         )
-                    
-                    cache_flags[-1] = t.item() / 1000
-                    cached_token_n = cache_flags[1].sum().item()
-                    total_cached_tokens += cached_token_n
-                    total_latent_tokens += latent_n
-            # print(
-            #     f"Step {i + 1}/{num_inference_steps}, cached latent tokens: {cached_token_n} / {latent_n}"
-            # )
+                    #for spotedit steps, we do selective computation
+                    else:
+                        cache_flags[1] = SpotSelect(self, x0_preds[-1], image_latents, threshold=config.threshold, method=config.judge_method, image_size=(height, width))
+                        if config.dilation_radius > 0:
+                            cache_flags[1] = dilate_uncached_mask(
+                                cache_flags[1],
+                                H_lat=height // self.vae_scale_factor // 2,
+                                W_lat=width // self.vae_scale_factor // 2,
+                                dilation_radius=config.dilation_radius,
+                            )
 
-            self._current_timestep = t
+                        if cache_flags[1].any():
+                            cache_final = cache_flags[1]
+                            cache_flags[2] = torch.ones(
+                                (image_n), dtype=torch.bool, device=device
+                            )
+                        else:
+                            cache_flags[2] = torch.zeros(
+                                (image_n), dtype=torch.bool, device=device
+                            )
 
-            uncached_latents = latents[:, cache_flags[1].logical_not()]
+                        cache_flags[-1] = t.item() / 1000
+                        cached_token_n = cache_flags[1].sum().item()
+                        total_cached_tokens += cached_token_n
+                        total_latent_tokens += latent_n
 
+                self._current_timestep = t
 
-            if image_latents is not None:
-                uncached_image_latents = image_latents[:, cache_flags[2].logical_not()]
-                latent_model_input = torch.cat([uncached_latents, uncached_image_latents], dim=1)
-            else:
-                latent_model_input = uncached_latents
+                uncached_latents = latents[:, cache_flags[1].logical_not()]
 
-            timestep = t.expand(latents.shape[0]).to(latents.dtype)
+                if image_latents is not None:
+                    uncached_image_latents = image_latents[:, cache_flags[2].logical_not()]
+                    latent_model_input = torch.cat([uncached_latents, uncached_image_latents], dim=1)
+                else:
+                    latent_model_input = uncached_latents
 
-            # pass the timestep to the scheduler
-            noise_pred = self.transformer(
-                hidden_states=latent_model_input,
-                timestep=timestep / 1000,
-                guidance=guidance,
-                pooled_projections=pooled_prompt_embeds,
-                encoder_hidden_states=prompt_embeds,
-                txt_ids=text_ids,
-                img_ids=latent_ids,
-                joint_attention_kwargs={},
-                return_dict=False,
-            )[0]
+                timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
-            if cache_flags[1].any():
-                uncached_n = cache_flags[1].logical_not().sum().item()
-                noisy_copy = last_noise_pred.clone()
-                noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
-                noise_pred = noisy_copy
-            else:
-                noise_pred = noise_pred[:, : latents.size(1)]
+                # pass the timestep to the scheduler
+                noise_pred = self.transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep / 1000,
+                    guidance=guidance,
+                    pooled_projections=pooled_prompt_embeds,
+                    encoder_hidden_states=prompt_embeds,
+                    txt_ids=text_ids,
+                    img_ids=latent_ids,
+                    joint_attention_kwargs={},
+                    return_dict=False,
+                )[0]
 
-            last_noise_pred = noise_pred
-            # compute the x_0 prediction
-            x0_preds.append(latents - t.item() / 1000 * noise_pred)
+                if cache_flags[1].any():
+                    uncached_n = cache_flags[1].logical_not().sum().item()
+                    noisy_copy = last_noise_pred.clone()
+                    noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
+                    noise_pred = noisy_copy
+                else:
+                    noise_pred = noise_pred[:, : latents.size(1)]
 
-            # compute the previous noisy sample x_t -> x_t-1
-            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                last_noise_pred = noise_pred
+                # compute the x_0 prediction
+                x0_preds.append(latents - t.item() / 1000 * noise_pred)
 
-            # call the callback, if provided
-            if i == len(timesteps) - 1 or (
-                (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
-            ):
-                progress_bar.update()
+                # compute the previous noisy sample x_t -> x_t-1
+                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-    self._current_timestep = None
-    # For non-edited tokens, we explicitly overwrite the generated latents with the original latents
-    if cache_final.any():
-        latents[:, cache_final] = image_latents[:, cache_final]
+                # call the callback, if provided
+                if i == len(timesteps) - 1 or (
+                    (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0
+                ):
+                    progress_bar.update()
 
-    if output_type == "latent":
-        image = latents
-    else:
-        latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
-        latents = (
-            latents / self.vae.config.scaling_factor
-        ) + self.vae.config.shift_factor
-        image = self.vae.decode(latents, return_dict=False)[0]
-        image = self.image_processor.postprocess(image, output_type=output_type)
+        self._current_timestep = None
+        # For non-edited tokens, we explicitly overwrite the generated latents with the original latents
+        if cache_final.any():
+            latents[:, cache_final] = image_latents[:, cache_final]
 
-    self.maybe_free_model_hooks()
+        if output_type == "latent":
+            image = latents
+        else:
+            latents = self._unpack_latents(latents, height, width, self.vae_scale_factor)
+            latents = (
+                latents / self.vae.config.scaling_factor
+            ) + self.vae.config.shift_factor
+            image = self.vae.decode(latents, return_dict=False)[0]
+            image = self.image_processor.postprocess(image, output_type=output_type)
 
-    return FluxPipelineOutput(images=image)
+        self.maybe_free_model_hooks()
+
+        return FluxPipelineOutput(images=image)
+    finally:
+        # restore the original attention processors so the pipe is left unmodified
+        for name, proc in _orig_procs:
+            self.transformer.get_submodule(name).set_processor(proc)

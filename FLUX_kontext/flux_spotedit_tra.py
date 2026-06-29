@@ -12,8 +12,8 @@ from diffusers.pipelines.flux.pipeline_flux_kontext import (
 from diffusers.models.transformers.transformer_flux import (
     FluxAttention,
 )
-from flux_spot_ultis import SpotEditConfig, SpotSelect, boundary_aware_smoothing, dilate_uncached_mask
-from fluxSpotAttn import SpotFusionAttnProcessor
+from .flux_spot_ultis import SpotEditConfig, SpotSelect, boundary_aware_smoothing, dilate_uncached_mask
+from .fluxSpotAttn import SpotFusionAttnProcessor
 
 @torch.no_grad()
 def generate(
@@ -30,6 +30,8 @@ def generate(
     _auto_resize: bool = True,
     config: Optional[SpotEditConfig] = None,
 ):
+    if config is None:
+        config = SpotEditConfig()
 
     height = height or self.default_sample_size * self.vae_scale_factor
     width = width or self.default_sample_size * self.vae_scale_factor

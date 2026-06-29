@@ -24,7 +24,7 @@ def seed_everything(seed: int = 42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def Spotselect(self, x0_pred, image_latents, threshold=0.1, method='L4'):
+def Spotselect(self, x0_pred, image_latents, threshold=0.1, method='L4', image_size=(1024, 1024)):
     """
     judge which tokens can be reused based on the selected method.
     """
@@ -43,18 +43,18 @@ def Spotselect(self, x0_pred, image_latents, threshold=0.1, method='L4'):
         return reuse
     elif method == 'LPIPS':
         if not hasattr(self, '_lpips_metric'):
-            self.vae.to('cuda')
+            self.vae.to(self._execution_device)
             self._lpips_metric = QwenTokenLPIPS(self.vae, patch_size=2, t_index=0)
         if self._lpips_metric._z2_cached is None:
             self._lpips_metric.set_reference_z2(
-                image_latents,  
-                image_size=(1024, 1024),
+                image_latents,
+                image_size=image_size,
                 vae_downsample_factor=8,
             )
         token_scores = self._lpips_metric(
-            x0_pred,  
+            x0_pred,
             image_latents,
-            image_size=(1024, 1024),
+            image_size=image_size,
             vae_downsample_factor=8,
             use_cache=True
         )

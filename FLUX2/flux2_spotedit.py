@@ -186,138 +186,139 @@ def generate(
         elif isinstance(module, Flux2ParallelSelfAttention):
             module.set_processor(Flux2ParallelSpotAttnProcessor(cache_flags))
 
-    H_lat = height // self.vae_scale_factor // 2
-    W_lat = width // self.vae_scale_factor // 2
+    try:
+        H_lat = height // self.vae_scale_factor // 2
+        W_lat = width // self.vae_scale_factor // 2
 
-    # 8. Denoising loop
-    self.scheduler.set_begin_index(0)
+        # 8. Denoising loop
+        self.scheduler.set_begin_index(0)
 
-    x0_preds = []
-    last_noise_pred = None
-    cache_final = torch.zeros((latent_n), dtype=torch.bool, device=device)
+        x0_preds = []
+        last_noise_pred = None
+        cache_final = torch.zeros((latent_n), dtype=torch.bool, device=device)
 
-    total_cached_tokens, total_latent_tokens = 0, 0
+        total_cached_tokens, total_latent_tokens = 0, 0
 
-    with self.progress_bar(total=num_inference_steps) as progress_bar:
-        for i, t in enumerate(timesteps):
-            if self.interrupt:
-                continue
+        with self.progress_bar(total=num_inference_steps) as progress_bar:
+            for i, t in enumerate(timesteps):
+                if self.interrupt:
+                    continue
 
-            if len(x0_preds):
-                # for the initial and reset steps, we do full computation
-                if i in config.reset_steps or i < config.initial_steps:
-                    cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
-                    cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
-                # for spotedit steps, we do selective computation
-                else:
-                    cache_flags[1] = SpotSelect(
-                        self, x0_preds[-1], ref_image_latents,
-                        threshold=config.threshold, method=config.judge_method,
-                        image_size=(height, width),
-                    )
-                    if config.dilation_radius > 0:
-                        cache_flags[1] = dilate_uncached_mask(
-                            cache_flags[1], H_lat=H_lat, W_lat=W_lat,
-                            dilation_radius=config.dilation_radius,
-                        )
-
-                    if cache_flags[1].any():
-                        cache_final = cache_flags[1]
-                        cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)
-                    else:
+                if len(x0_preds):
+                    # for the initial and reset steps, we do full computation
+                    if i in config.reset_steps or i < config.initial_steps:
+                        cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
                         cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
+                    # for spotedit steps, we do selective computation
+                    else:
+                        cache_flags[1] = SpotSelect(
+                            self, x0_preds[-1], ref_image_latents,
+                            threshold=config.threshold, method=config.judge_method,
+                            image_size=(height, width),
+                        )
+                        if config.dilation_radius > 0:
+                            cache_flags[1] = dilate_uncached_mask(
+                                cache_flags[1], H_lat=H_lat, W_lat=W_lat,
+                                dilation_radius=config.dilation_radius,
+                            )
 
-                    cache_flags[-1] = t.item() / 1000
-                    total_cached_tokens += cache_flags[1].sum().item()
-                    total_latent_tokens += latent_n
+                        if cache_flags[1].any():
+                            cache_final = cache_flags[1]
+                            cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)
+                        else:
+                            cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
 
-            self._current_timestep = t
+                        cache_flags[-1] = t.item() / 1000
+                        total_cached_tokens += cache_flags[1].sum().item()
+                        total_latent_tokens += latent_n
 
-            uncached_latents = latents[:, cache_flags[1].logical_not()]
+                self._current_timestep = t
 
-            latent_image_ids = latent_ids
-            if image_latents is not None:
-                uncached_image_latents = image_latents[:, cache_flags[2].logical_not()]
-                latent_model_input = torch.cat([uncached_latents, uncached_image_latents], dim=1)
-                latent_image_ids = torch.cat([latent_ids, image_latent_ids], dim=1)
-            else:
-                latent_model_input = uncached_latents
-            latent_model_input = latent_model_input.to(self.transformer.dtype)
+                uncached_latents = latents[:, cache_flags[1].logical_not()]
 
-            timestep = t.expand(latents.shape[0]).to(latents.dtype)
+                latent_image_ids = latent_ids
+                if image_latents is not None:
+                    uncached_image_latents = image_latents[:, cache_flags[2].logical_not()]
+                    latent_model_input = torch.cat([uncached_latents, uncached_image_latents], dim=1)
+                    latent_image_ids = torch.cat([latent_ids, image_latent_ids], dim=1)
+                else:
+                    latent_model_input = uncached_latents
+                latent_model_input = latent_model_input.to(self.transformer.dtype)
 
-            noise_pred = self.transformer(
-                hidden_states=latent_model_input,
-                timestep=timestep / 1000,
-                guidance=guidance,
-                encoder_hidden_states=prompt_embeds,
-                txt_ids=text_ids,
-                img_ids=latent_image_ids,
-                joint_attention_kwargs=self._attention_kwargs,
-                return_dict=False,
-            )[0]
+                timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
-            # update the noise prediction only for edited (uncached) tokens
-            if cache_flags[1].any():
-                uncached_n = cache_flags[1].logical_not().sum().item()
-                noisy_copy = last_noise_pred.clone()
-                noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
-                noise_pred = noisy_copy
-            else:
-                noise_pred = noise_pred[:, : latents.size(1)]
+                noise_pred = self.transformer(
+                    hidden_states=latent_model_input,
+                    timestep=timestep / 1000,
+                    guidance=guidance,
+                    encoder_hidden_states=prompt_embeds,
+                    txt_ids=text_ids,
+                    img_ids=latent_image_ids,
+                    joint_attention_kwargs=self._attention_kwargs,
+                    return_dict=False,
+                )[0]
 
-            last_noise_pred = noise_pred
+                # update the noise prediction only for edited (uncached) tokens
+                if cache_flags[1].any():
+                    uncached_n = cache_flags[1].logical_not().sum().item()
+                    noisy_copy = last_noise_pred.clone()
+                    noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
+                    noise_pred = noisy_copy
+                else:
+                    noise_pred = noise_pred[:, : latents.size(1)]
 
-            # compute the x_0 prediction
-            x0_preds.append(latents - t.item() / 1000 * noise_pred)
+                last_noise_pred = noise_pred
 
-            # compute the previous noisy sample x_t -> x_t-1
-            latents_dtype = latents.dtype
-            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                # compute the x_0 prediction
+                x0_preds.append(latents - t.item() / 1000 * noise_pred)
 
-            if latents.dtype != latents_dtype:
-                if torch.backends.mps.is_available():
-                    # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
-                    latents = latents.to(latents_dtype)
+                # compute the previous noisy sample x_t -> x_t-1
+                latents_dtype = latents.dtype
+                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
-            if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
-                progress_bar.update()
+                if latents.dtype != latents_dtype:
+                    if torch.backends.mps.is_available():
+                        # some platforms (eg. apple mps) misbehave due to a pytorch bug: https://github.com/pytorch/pytorch/pull/99272
+                        latents = latents.to(latents_dtype)
 
-            if XLA_AVAILABLE:
-                xm.mark_step()
+                if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
+                    progress_bar.update()
 
-    self._current_timestep = None
-    # For non-edited tokens, restore the original latents and smooth the edit boundary
-    if cache_final.any():
-        latents[:, cache_final] = ref_image_latents[:, cache_final]
-        latents = boundary_aware_smoothing(
-            latents, ref_image_latents,
-            non_edit_mask=cache_final.unsqueeze(0), lambda0=0.8, hw=(H_lat, W_lat),
-        )
+                if XLA_AVAILABLE:
+                    xm.mark_step()
 
-    if output_type == "latent":
-        image = latents
-    else:
-        latents = self._unpack_latents_with_ids(latents, latent_ids)
+        self._current_timestep = None
+        # For non-edited tokens, restore the original latents and smooth the edit boundary
+        if cache_final.any():
+            latents[:, cache_final] = ref_image_latents[:, cache_final]
+            latents = boundary_aware_smoothing(
+                latents, ref_image_latents,
+                non_edit_mask=cache_final.unsqueeze(0), lambda0=0.8, hw=(H_lat, W_lat),
+            )
 
-        latents_bn_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(latents.device, latents.dtype)
-        latents_bn_std = torch.sqrt(
-            self.vae.bn.running_var.view(1, -1, 1, 1) + self.vae.config.batch_norm_eps
-        ).to(latents.device, latents.dtype)
-        latents = latents * latents_bn_std + latents_bn_mean
-        latents = self._unpatchify_latents(latents)
+        if output_type == "latent":
+            image = latents
+        else:
+            latents = self._unpack_latents_with_ids(latents, latent_ids)
 
-        image = self.vae.decode(latents, return_dict=False)[0]
-        image = self.image_processor.postprocess(image, output_type=output_type)
+            latents_bn_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(latents.device, latents.dtype)
+            latents_bn_std = torch.sqrt(
+                self.vae.bn.running_var.view(1, -1, 1, 1) + self.vae.config.batch_norm_eps
+            ).to(latents.device, latents.dtype)
+            latents = latents * latents_bn_std + latents_bn_mean
+            latents = self._unpatchify_latents(latents)
 
-    # restore the original attention processors so the pipe is left unmodified
-    for name, proc in _orig_procs:
-        self.transformer.get_submodule(name).set_processor(proc)
+            image = self.vae.decode(latents, return_dict=False)[0]
+            image = self.image_processor.postprocess(image, output_type=output_type)
 
-    # Offload all models
-    self.maybe_free_model_hooks()
+        # Offload all models
+        self.maybe_free_model_hooks()
 
-    if not return_dict:
-        return (image,)
+        if not return_dict:
+            return (image,)
 
-    return Flux2PipelineOutput(images=image)
+        return Flux2PipelineOutput(images=image)
+    finally:
+        # restore the original attention processors so the pipe is left unmodified
+        for name, proc in _orig_procs:
+            self.transformer.get_submodule(name).set_processor(proc)

@@ -103,11 +103,16 @@ class FLUX2VAETokenLPIPS(nn.Module):
         z1 = self._unpatchify(self._apply_bn_denorm(self._safe_unpack_tokens(z1, image_size, vae_downsample_factor)))
 
         feats1 = self._forward_decoder_first3(z1)
-        if use_cache and self._z2_feats_cache is not None:
+        if use_cache and self.check_z2_cache_valid(z2):
             feats2 = self._z2_feats_cache
         else:
             z2u = self._unpatchify(self._apply_bn_denorm(self._safe_unpack_tokens(z2, image_size, vae_downsample_factor)))
             feats2 = self._forward_decoder_first3(z2u)
+            if use_cache:
+                # refresh the cache so a different reference image in a later call
+                # is not silently judged against the previous one.
+                self._z2_cached = z2
+                self._z2_feats_cache = feats2
 
         B, _, H_lat, W_lat = z1.shape
         target_hw = (H_lat, W_lat)
