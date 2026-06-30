@@ -56,6 +56,7 @@ def generate(
     max_sequence_length: int = 512,
     text_encoder_out_layers: tuple = (9, 18, 27),
     config: SpotEditConfig = SpotEditConfig(),
+    aux: Optional[dict] = None,
 ):
     self.check_inputs(
         prompt=prompt, height=height, width=width, prompt_embeds=prompt_embeds,
@@ -214,6 +215,12 @@ def generate(
                     xm.mark_step()
 
         self._current_timestep = None
+
+        # expose the final reuse mask (True = non-edited / reused token) for visualisation
+        if aux is not None:
+            aux["reuse_mask"] = cache_final.detach().to("cpu").clone()
+            aux["H_lat"] = H_lat
+            aux["W_lat"] = W_lat
 
         latent_height = 2 * (int(height) // (self.vae_scale_factor * 2))
         latent_width = 2 * (int(width) // (self.vae_scale_factor * 2))
