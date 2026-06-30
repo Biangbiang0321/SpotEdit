@@ -12,7 +12,7 @@ from diffusers.pipelines.flux.pipeline_flux_kontext import (
 from diffusers.models.transformers.transformer_flux import (
     FluxAttention,
 )
-from .flux_spot_ultis import SpotEditConfig, SpotSelect, boundary_aware_smoothing, dilate_uncached_mask
+from .flux_spot_ultis import SpotEditConfig, SpotSelect, boundary_aware_smoothing, dilate_uncached_mask, select_reuse_mask
 from .fluxSpotAttn import SpotFusionAttnProcessor
 
 @torch.no_grad()
@@ -177,14 +177,13 @@ def generate(
                     )
                 #for spotedit steps, we do selective computation
                 else:
-                    cache_flags[1] = SpotSelect(self, x0_preds[-1], image_latents, threshold=config.threshold, method=config.judge_method)
-                    if config.dilation_radius > 0:
-                        cache_flags[1] = dilate_uncached_mask(
-                            cache_flags[1],
-                            H_lat=height // self.vae_scale_factor // 2,
-                            W_lat=width // self.vae_scale_factor // 2,
-                            dilation_radius=config.dilation_radius,
-                        )
+                    # on full-reuse, lower threshold + re-judge so some tokens stay uncached
+                    cache_flags[1] = select_reuse_mask(
+                        self, x0_preds[-1], image_latents,
+                        height // self.vae_scale_factor // 2, width // self.vae_scale_factor // 2,
+                        threshold=config.threshold, method=config.judge_method,
+                        image_size=(height, width), dilation_radius=config.dilation_radius,
+                    )
 
                     if cache_flags[1].any():
                         cache_final = cache_flags[1]

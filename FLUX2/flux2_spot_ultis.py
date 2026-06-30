@@ -16,6 +16,9 @@ class SpotEditConfig:
     initial_steps: int = 4
     reset_steps: list = field(default_factory=lambda: [13, 22, 31])
     dilation_radius: int = 1
+    # "velocity" (default): reused tokens' velocity = (x_t - x0_orig)/sigma -> flow to source, no seam.
+    # "overwrite": GitHub default -- hard latent paste + boundary smoothing (can leave a seam).
+    reuse_mode: str = "velocity"
 
 
 def SpotSelect(self, x0_pred, image_latents, threshold=0.1, method='L4', image_size=(1024, 1024)):
@@ -68,6 +71,29 @@ def dilate_uncached_mask(reuse_mask: torch.Tensor, H_lat: int, W_lat: int,
 
     # turn back to reuse mask
     return (~dilated.squeeze().bool()).view(-1)
+
+
+def select_reuse_mask(self, x0_pred, image_latents, H_lat, W_lat, *, threshold, method,
+                      image_size, dilation_radius, min_threshold=1e-4, decay=0.5):
+    """Reuse mask (True = reuse / non-edited) with a full-reuse guard.
+
+    If the judge would mark EVERY token reusable, the transformer recomputes 0 latent tokens
+    (an empty query that can crash RoPE on some backbones). In that case, repeatedly lower the
+    threshold and re-judge until at least one token is left uncached. If the prediction equals
+    the source everywhere (no threshold helps), fall back to a full-recompute step."""
+    def _mask(thr):
+        reuse = SpotSelect(self, x0_pred, image_latents, threshold=thr, method=method, image_size=image_size)
+        if dilation_radius > 0:
+            reuse = dilate_uncached_mask(reuse, H_lat, W_lat, dilation_radius=dilation_radius)
+        return reuse
+    mask = _mask(threshold)
+    thr = threshold
+    while bool(mask.all()) and thr > min_threshold:
+        thr = thr * decay
+        mask = _mask(thr)
+    if bool(mask.all()):
+        mask = torch.zeros_like(mask)
+    return mask
 
 
 def boundary_aware_smoothing(

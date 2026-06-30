@@ -27,6 +27,7 @@ logger = logging.get_logger(__name__)
 from .qwenSpotAttn import QwenSpotEditAttnProcessor
 from .qwen_spot_ultis import (
     Spotselect, SpotEditConfig, dilate_uncached_mask, boundary_aware_smoothing, feather_composite,
+    select_reuse_mask,
 )
 
 # Qwen-Image-Edit-2509 encodes each reference image twice: a small one for the
@@ -281,16 +282,15 @@ def generate(
                     if config.select_every_step or ac == 1:
                         if step_timing:
                             torch.cuda.synchronize(); _t_sel = time.perf_counter()
-                        if len(x0_preds):
-                            reuse = Spotselect(
-                                self, x0_preds[-1], ref_image_latents,
-                                threshold=config.threshold, method=config.judge_method,
-                                image_size=(height, width),
-                            )
-                        # dilate for stable results
+                        # dilate for stable results; on full-reuse, lower threshold + re-judge
                         H_lat = height // self.vae_scale_factor // 2
                         W_lat = width // self.vae_scale_factor // 2
-                        cache_flags[1] = dilate_uncached_mask(reuse, H_lat, W_lat, dilation_radius=config.dilation_radius)
+                        if len(x0_preds):
+                            cache_flags[1] = select_reuse_mask(
+                                self, x0_preds[-1], ref_image_latents, H_lat, W_lat,
+                                threshold=config.threshold, method=config.judge_method,
+                                image_size=(height, width), dilation_radius=config.dilation_radius,
+                            )
                         if cache_flags[1].any():
                             cache_final = cache_flags[1]
                             cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)

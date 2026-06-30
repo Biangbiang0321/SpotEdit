@@ -102,6 +102,30 @@ def dilate_uncached_mask(reuse_mask: torch.Tensor, H_lat: int, W_lat: int,
     return (~dilated.squeeze().bool()).view(-1)
 
 
+def select_reuse_mask(self, x0_pred, image_latents, H_lat, W_lat, *, threshold, method,
+                      image_size, dilation_radius, min_threshold=1e-4, decay=0.5):
+    """Reuse mask (True = reuse / non-edited) with a full-reuse guard.
+
+    If the judge would mark EVERY token reusable, the transformer is fed 0 latent tokens to
+    recompute -- an empty query that crashes Qwen's RoPE (reshape of a 0-element tensor). In
+    that case, repeatedly lower the threshold and re-judge until at least one token is left
+    uncached. If the prediction equals the source everywhere (no threshold helps), fall back
+    to a full-recompute step (nothing reused)."""
+    def _mask(thr):
+        reuse = Spotselect(self, x0_pred, image_latents, threshold=thr, method=method, image_size=image_size)
+        if dilation_radius > 0:
+            reuse = dilate_uncached_mask(reuse, H_lat, W_lat, dilation_radius=dilation_radius)
+        return reuse
+    mask = _mask(threshold)
+    thr = threshold
+    while bool(mask.all()) and thr > min_threshold:
+        thr = thr * decay
+        mask = _mask(thr)
+    if bool(mask.all()):
+        mask = torch.zeros_like(mask)
+    return mask
+
+
 def _gaussian_blur(x, sigma):
     """Separable Gaussian blur on [B,1,H,W] (or [B,C,H,W]) with replicate padding."""
     k = max(3, int(2 * round(3 * sigma) + 1))

@@ -31,6 +31,7 @@ from .flux2_spot_ultis import (
     SpotSelect,
     dilate_uncached_mask,
     boundary_aware_smoothing,
+    select_reuse_mask,
 )
 
 
@@ -55,6 +56,7 @@ def generate(
     max_sequence_length: int = 512,
     text_encoder_out_layers: tuple = (10, 20, 30),
     config: SpotEditConfig = SpotEditConfig(),
+    aux: Optional[dict] = None,
 ):
     # 1. Check inputs. Raise error if not correct
     self.check_inputs(
@@ -211,16 +213,12 @@ def generate(
                         cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
                     # for spotedit steps, we do selective computation
                     else:
-                        cache_flags[1] = SpotSelect(
-                            self, x0_preds[-1], ref_image_latents,
+                        # on full-reuse, lower threshold + re-judge so some tokens stay uncached
+                        cache_flags[1] = select_reuse_mask(
+                            self, x0_preds[-1], ref_image_latents, H_lat, W_lat,
                             threshold=config.threshold, method=config.judge_method,
-                            image_size=(height, width),
+                            image_size=(height, width), dilation_radius=config.dilation_radius,
                         )
-                        if config.dilation_radius > 0:
-                            cache_flags[1] = dilate_uncached_mask(
-                                cache_flags[1], H_lat=H_lat, W_lat=W_lat,
-                                dilation_radius=config.dilation_radius,
-                            )
 
                         if cache_flags[1].any():
                             cache_final = cache_flags[1]
@@ -261,7 +259,13 @@ def generate(
                 # update the noise prediction only for edited (uncached) tokens
                 if cache_flags[1].any():
                     uncached_n = cache_flags[1].logical_not().sum().item()
-                    noisy_copy = last_noise_pred.clone()
+                    if config.reuse_mode == "velocity" and ref_image_latents is not None:
+                        # reused tokens flow straight to the source: v=(x_t-x0_orig)/sigma
+                        # => x0_pred = x_t - sigma*v = x0_orig (smooth, no end-of-run seam).
+                        sigma = t.item() / 1000
+                        noisy_copy = (latents - ref_image_latents) / sigma
+                    else:
+                        noisy_copy = last_noise_pred.clone()
                     noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
                     noise_pred = noisy_copy
                 else:
@@ -288,8 +292,14 @@ def generate(
                     xm.mark_step()
 
         self._current_timestep = None
-        # For non-edited tokens, restore the original latents and smooth the edit boundary
-        if cache_final.any():
+        # expose the final reuse mask (True = non-edited / reused token) for visualisation
+        if aux is not None:
+            aux["reuse_mask"] = cache_final.detach().to("cpu").clone()
+            aux["H_lat"] = H_lat
+            aux["W_lat"] = W_lat
+        # "overwrite": hard latent paste + boundary smoothing. "velocity": reused tokens already
+        # flowed to the source in-loop, so keep the generated latents as-is.
+        if cache_final.any() and config.reuse_mode == "overwrite":
             latents[:, cache_final] = ref_image_latents[:, cache_final]
             latents = boundary_aware_smoothing(
                 latents, ref_image_latents,

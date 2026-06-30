@@ -23,7 +23,7 @@ else:
 logger = logging.get_logger(__name__)  
 
 from .qwenSpotAttn import QwenSpotEditAttnProcessor
-from .qwen_spot_ultis import  Spotselect, SpotEditConfig, dilate_uncached_mask
+from .qwen_spot_ultis import  Spotselect, SpotEditConfig, dilate_uncached_mask, select_reuse_mask
 
 
 
@@ -243,12 +243,15 @@ def generate(
                     ac += 1
                 else:
                     if ac == 1:
-                        if len(x0_preds):
-                            reuse = Spotselect(self, x0_preds[-1], image_latents, threshold=config.threshold, method=config.judge_method, image_size=(height, width))
-                        #dilate for stable results
+                        #dilate for stable results; on full-reuse, lower threshold + re-judge
                         H_lat = height // self.vae_scale_factor // 2
                         W_lat = width // self.vae_scale_factor // 2
-                        cache_flags[1] = dilate_uncached_mask(reuse, H_lat, W_lat, dilation_radius=config.dilation_radius)
+                        if len(x0_preds):
+                            cache_flags[1] = select_reuse_mask(
+                                self, x0_preds[-1], image_latents, H_lat, W_lat,
+                                threshold=config.threshold, method=config.judge_method,
+                                image_size=(height, width), dilation_radius=config.dilation_radius,
+                            )
                         if cache_flags[1].any():
                             cache_final = cache_flags[1]
                             cache_flags[2] = torch.ones(

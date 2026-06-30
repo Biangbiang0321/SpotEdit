@@ -33,7 +33,7 @@ else:
 logger = logging.get_logger(__name__)
 
 from .flux2SpotAttn import Flux2SpotAttnProcessor, Flux2ParallelSpotAttnProcessor
-from .flux2_spot_ultis import SpotEditConfig, SpotSelect, dilate_uncached_mask
+from .flux2_spot_ultis import SpotEditConfig, SpotSelect, dilate_uncached_mask, select_reuse_mask
 
 
 @torch.no_grad()
@@ -164,12 +164,10 @@ def generate(
                         cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
                         cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
                     else:
-                        cache_flags[1] = SpotSelect(self, x0_preds[-1], ref_image_latents,
-                                                    threshold=config.threshold, method=config.judge_method,
-                                                    image_size=(height, width))
-                        if config.dilation_radius > 0:
-                            cache_flags[1] = dilate_uncached_mask(cache_flags[1], H_lat=H_lat, W_lat=W_lat,
-                                                                  dilation_radius=config.dilation_radius)
+                        # on full-reuse, lower threshold + re-judge so some tokens stay uncached
+                        cache_flags[1] = select_reuse_mask(self, x0_preds[-1], ref_image_latents, H_lat, W_lat,
+                                                           threshold=config.threshold, method=config.judge_method,
+                                                           image_size=(height, width), dilation_radius=config.dilation_radius)
                         if cache_flags[1].any():
                             cache_final = cache_flags[1]
                             cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)

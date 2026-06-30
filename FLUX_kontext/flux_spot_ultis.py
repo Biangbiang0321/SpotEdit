@@ -145,3 +145,26 @@ def dilate_uncached_mask(reuse_mask_1d: torch.Tensor, H_lat: int, W_lat: int,
     )
 
     return dilated.view(-1).bool()
+
+
+def select_reuse_mask(self, x0_pred, image_latents, H_lat, W_lat, *, threshold, method,
+                      image_size, dilation_radius, min_threshold=1e-4, decay=0.5):
+    """Reuse mask (True = reuse / non-edited) with a full-reuse guard.
+
+    If the judge would mark EVERY token reusable, the transformer recomputes 0 latent tokens
+    (an empty query that can crash RoPE on some backbones). In that case, repeatedly lower the
+    threshold and re-judge until at least one token is left uncached. If the prediction equals
+    the source everywhere (no threshold helps), fall back to a full-recompute step."""
+    def _mask(thr):
+        reuse = SpotSelect(self, x0_pred, image_latents, threshold=thr, method=method, image_size=image_size)
+        if dilation_radius > 0:
+            reuse = dilate_uncached_mask(reuse, H_lat, W_lat, dilation_radius=dilation_radius)
+        return reuse
+    mask = _mask(threshold)
+    thr = threshold
+    while bool(mask.all()) and thr > min_threshold:
+        thr = thr * decay
+        mask = _mask(thr)
+    if bool(mask.all()):
+        mask = torch.zeros_like(mask)
+    return mask
