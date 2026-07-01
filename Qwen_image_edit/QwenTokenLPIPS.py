@@ -46,6 +46,11 @@ class QwenTokenLPIPS(nn.Module):
         z = z_tokens.view(B, H_lat // 2, W_lat // 2, Ctok // channels_per_token_div, 2, 2)
         z = z.permute(0, 3, 1, 4, 2, 5).contiguous()
         z = z.view(B, Ctok // channels_per_token_div, H_lat, W_lat)
+        # Give the latent a proper singleton time axis: [B, z_dim, 1, H, W]. The Qwen VAE decoder
+        # is a 3D (video) net, so without this the later 4D-latent x 5D mean/std broadcast would
+        # inflate the tensor to [B, z_dim, z_dim, H, W] and decode a z_dim-frame volume on scrambled
+        # features (~z_dim x the compute, worse edit localisation). See LPIPS_SPEED_STUDY on branch.
+        z = z.unsqueeze(2)
         return z
 
     def _apply_qwen_mean_std(self, z5d):
