@@ -61,7 +61,9 @@ SpotEdit's behaviour is controlled through `SpotEditConfig`. Two options are wor
 **`judge_method` — how the reuse / recompute split is decided**
 Each step, SpotEdit assigns every token a per-token LPIPS-like edit score `d` (lower tends to mean unchanged, higher tends to mean edited).
 - `"LPIPS"`: a token is reused when `d < threshold`, i.e. a fixed cutoff you set.
-- `"LPIPS_kmeans"`: the cutoff is instead chosen adaptively per step by running 1-D k-means (k = 2, sum-of-squares split) over the token scores and reusing the lower-score cluster. This can help reduce the need to hand-tune `threshold` when the score scale differs across images or backbones; `threshold` is then kept mainly as a full-reuse safety fallback. It is used as the default for the Qwen-Image-Edit base model.
+- `"LPIPS_kmeans"`: the cutoff is instead chosen adaptively per step by running 1-D k-means (k = 2, sum-of-squares split) over the token scores and reusing the lower-score cluster. This can help reduce the need to hand-tune `threshold` when the score scale differs across images or backbones; `threshold` is then kept mainly as a full-reuse safety fallback.
+
+`"LPIPS_kmeans"` is available on every backbone. It is used as the **default for the Qwen family** (Qwen-Image-Edit and Qwen-Image-Edit-Plus), while the FLUX backbones (FLUX.1-Kontext, FLUX.2 [klein]) keep the fixed-threshold `"LPIPS"` as their default.
 
 ### limitation
 1. SpotEdit is not intended for global edits that affect most or all regions of the image, such as full-scene style transfer or global color changes. In these cases, SpotEdit cannot reliably identify non-edited regions, and thus falls back to computation that is effectively equivalent to the original full-image diffusion process.

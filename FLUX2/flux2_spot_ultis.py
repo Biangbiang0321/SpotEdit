@@ -21,6 +21,22 @@ class SpotEditConfig:
     reuse_mode: str = "velocity"
 
 
+def _kmeans2_reuse(d):
+    """Split per-token scores into reuse/recompute by 1D k-means (k=2, optimal SSE split),
+    instead of a fixed threshold. reuse = low-score cluster (tokens close to the source)."""
+    x = d.detach().float().cpu().numpy()
+    s = np.sort(x.astype(np.float64)); n = len(s)
+    if n < 2 or s[-1] <= s[0]:
+        return d <= float(s[-1])
+    pre = np.cumsum(s); pre2 = np.cumsum(s ** 2); tot, tot2 = pre[-1], pre2[-1]; best, bi = np.inf, 1
+    for i in range(1, n):
+        nL = i; sL = pre[i - 1]; qL = pre2[i - 1]; nR = n - i; sR = tot - sL; qR = tot2 - qL
+        sse = (qL - sL * sL / nL) + (qR - sR * sR / nR)
+        if sse < best:
+            best, bi = sse, i
+    return d <= float((s[bi - 1] + s[bi]) / 2)
+
+
 def SpotSelect(self, x0_pred, image_latents, threshold=0.1, method='L4', image_size=(1024, 1024)):
     """Return a boolean reuse mask (True = token can be cached / is non-edited).
 
@@ -51,6 +67,19 @@ def SpotSelect(self, x0_pred, image_latents, threshold=0.1, method='L4', image_s
         )
         reuse = token_scores.mean(dim=0) < threshold
         return reuse
+    elif method == 'LPIPS_kmeans':
+        # same LPIPS score as 'LPIPS', but the reuse/recompute cut is chosen adaptively per step
+        # by 1D k-means (k=2) instead of the fixed `threshold`. Available as an option; not default.
+        if not hasattr(self, 'metric') or self.metric is None:
+            self.metric = FLUX2VAETokenLPIPS(self.vae)
+        if self.metric._z2_cached is None:
+            self.metric.set_z2_cache(image_latents, image_size=image_size, vae_downsample_factor=8)
+        token_scores = self.metric(
+            x0_pred, image_latents,
+            image_size=image_size,
+            vae_downsample_factor=8,
+        )
+        return _kmeans2_reuse(token_scores.mean(dim=0))
     else:
         raise NotImplementedError(f"Method {method} not implemented.")
 
