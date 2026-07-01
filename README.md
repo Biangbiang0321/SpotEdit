@@ -45,6 +45,20 @@ pip install -r requirements.txt
 
 ### Guidelines for Spotedit
 1. Experiments and test examples are typically conducted at a resolution of 1024×1024. We recommend setting both input and output image sizes to 1024×1024 when running SpotEdit.
+2. To help preserve the subject's proportions, it can be useful to feed a square canvas: scale the source to fit 1024×1024 while keeping its aspect ratio and pad the remainder (aspect-preserving letterbox), instead of stretching a non-square image to 1024×1024. The example notebooks do this by default.
+
+### Key options (`SpotEditConfig`)
+
+SpotEdit's behaviour is controlled through `SpotEditConfig`. Two options are worth highlighting:
+
+**`reuse_mode` — how cached tokens are written back each denoising step**
+- `"velocity"` *(default)*: at every step the reused (non-edited) tokens are guided toward the source image by setting their predicted velocity to `v = (x_t − x0_src) / σ`, so their `x0` prediction stays close to the source latent. The reused region then follows a similar trajectory to the recomputed region, which helps keep the boundary smooth and avoids relying on a hard paste at the end.
+- `"overwrite"`: reused tokens keep the cached prediction during the loop and the source latents are hard-pasted onto them once, after the final step. This is simpler, though it can leave a more visible boundary between the reused and regenerated regions.
+
+**`judge_method` — how the reuse / recompute split is decided**
+Each step, SpotEdit assigns every token a per-token LPIPS-like edit score `d` (lower tends to mean unchanged, higher tends to mean edited).
+- `"LPIPS"`: a token is reused when `d < threshold`, i.e. a fixed cutoff you set.
+- `"LPIPS_kmeans"`: the cutoff is instead chosen adaptively per step by running 1-D k-means (k = 2, sum-of-squares split) over the token scores and reusing the lower-score cluster. This can help reduce the need to hand-tune `threshold` when the score scale differs across images or backbones; `threshold` is then kept mainly as a full-reuse safety fallback. It is used as the default for the Qwen-Image-Edit base model.
 
 ### limitation
 1. SpotEdit is not intended for global edits that affect most or all regions of the image, such as full-scene style transfer or global color changes. In these cases, SpotEdit cannot reliably identify non-edited regions, and thus falls back to computation that is effectively equivalent to the original full-image diffusion process.

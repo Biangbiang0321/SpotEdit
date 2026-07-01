@@ -1,6 +1,9 @@
-diffusers
+diffusers        # FLUX.2 [klein] example additionally needs diffusers>=0.37 (Flux2KleinPipeline)
 torch
-numpy
-sentencepiece
-jupyter
+numpy            # used by the LPIPS_kmeans adaptive cutoff
+Pillow           # image I/O + aspect-preserving letterbox preprocessing
+accelerate       # required by the diffusers from_pretrained pipelines
 transformers
+sentencepiece    # tokenizer backend for the text encoders
+protobuf         # tokenizer backend for the text encoders
+jupyter
