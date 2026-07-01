@@ -81,51 +81,26 @@ class QwenSpotEditAttnProcessor:
 
 
         if self.cache_flags[1].any():
-            text_n = self.cache_flags[0].logical_not().sum().item()
             latent_n = self.cache_flags[1].logical_not().sum().item()
             latent_n2 = self.cache_flags[1].shape[0]
-            image_n = self.cache_flags[2].shape[0]
+            uncached = self.cache_flags[1].logical_not()
 
-            latent_key = img_key[:,:latent_n,:]
-            latent_value = img_value[:,:latent_n,:]
-            if self._cached_keys is not None:
-                expanded_key = self._cached_keys[:,  latent_n2 :, :].clone()
-                expanded_value = self._cached_values[:, latent_n2 :, :].clone()
-            else:
-                expanded_key = img_key[:,  latent_n :, :].clone()
-                expanded_value = img_value[:, latent_n :, :].clone()
+            # fresh keys/values for the recomputed latent tokens
+            # (Qwen image stream is ordered [latents, image_cond], no text prefix)
+            latent_key = img_key[:, :latent_n, :]
+            latent_value = img_value[:, :latent_n, :]
 
-            expanded_key[:,self.cache_flags[1].logical_not(),:] = latent_key
-            expanded_value[:,self.cache_flags[1].logical_not(),:] = latent_value
+            # update the running cache at the recomputed latent slots
+            self._cached_keys[:, :latent_n2][:, uncached] = latent_key
+            self._cached_values[:, :latent_n2][:, uncached] = latent_value
+            self._cached_t[:, :latent_n2][:, uncached] = self.cache_flags[-1]
 
-
-            if self._cached_keys is not None:
-                self._cached_keys[:, :latent_n2][
-                    :, self.cache_flags[1].logical_not()
-                ] = latent_key
-                self._cached_values[:, :latent_n2][
-                    :, self.cache_flags[1].logical_not()
-                ] = latent_value
-                self._cached_t[:, :latent_n2][
-                    :, self.cache_flags[1].logical_not()
-                ] = self.cache_flags[-1]
-
-                t = torch.tensor(self.cache_flags[-1]).to(device=img_key.device)
-                lmd = torch.cos(0.5*torch.pi *(t/1000))**2
-                # lmd = 1- t/1000
-
-                expanded_key = (1 - lmd) * expanded_key + lmd * self._cached_keys[:,  :  latent_n2]
-                expanded_value = (1 - lmd) * expanded_value + lmd * self._cached_values[:, : latent_n2]
-
-            img_key = torch.cat([
-                expanded_key,
-                self._cached_keys[:,latent_n2:,:]
-            ],dim=1)
-
-            img_value = torch.cat([
-                expanded_value,
-                self._cached_values[:,latent_n2:,:]
-            ],dim=1)
+            # full sequence: cached latents (fresh@uncached, cached@reused) + cached image_cond.
+            # Reading straight from the cache reproduces the FLUX.1/Qwen cos^2 time-decay blend,
+            # which on the original timestep schedule evaluates to ~1 ("use the cache"), and unlike
+            # the reference does not assume latent_n2 == image_n, so multiple reference images work.
+            img_key = self._cached_keys
+            img_value = self._cached_values
         else:
             self._cached_keys = img_key
             self._cached_values = img_value
