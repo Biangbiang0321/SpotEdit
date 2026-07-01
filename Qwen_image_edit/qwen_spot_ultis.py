@@ -9,7 +9,7 @@ from .QwenTokenLPIPS import QwenTokenLPIPS
 class SpotEditConfig:
     # ---- cache decision ----
     threshold: float = 0.15
-    judge_method: str = "LPIPS"
+    judge_method: str = "LPIPS_kmeans"   # adaptive 1D-kmeans cut (was fixed-threshold "LPIPS")
     initial_steps: int = 4
     reset_steps:  list = field(default_factory=lambda: [13,22,31])
     dilation_radius: int = 1
@@ -25,6 +25,35 @@ def seed_everything(seed: int = 42):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+def _lpips_token_score(self, x0_pred, image_latents, image_size):
+    """Per-token LPIPS-like edit score d (mean over channels): high = edited, low = unchanged."""
+    if not hasattr(self, '_lpips_metric'):
+        self.vae.to(self._execution_device)
+        self._lpips_metric = QwenTokenLPIPS(self.vae, patch_size=2, t_index=0)
+    if self._lpips_metric._z2_cached is None:
+        self._lpips_metric.set_reference_z2(
+            image_latents, image_size=image_size, vae_downsample_factor=8,
+        )
+    token_scores = self._lpips_metric(
+        x0_pred, image_latents, image_size=image_size, vae_downsample_factor=8, use_cache=True,
+    )
+    return token_scores.mean(dim=0)
+
+def _kmeans2_reuse(d):
+    """Split per-token scores into reuse/recompute by 1D k-means (k=2, optimal SSE split),
+    instead of a fixed threshold. reuse = low-score cluster (tokens close to the source)."""
+    x = d.detach().float().cpu().numpy()
+    s = np.sort(x.astype(np.float64)); n = len(s)
+    if n < 2 or s[-1] <= s[0]:
+        return d <= float(s[-1])
+    pre = np.cumsum(s); pre2 = np.cumsum(s ** 2); tot, tot2 = pre[-1], pre2[-1]; best, bi = np.inf, 1
+    for i in range(1, n):
+        nL = i; sL = pre[i - 1]; qL = pre2[i - 1]; nR = n - i; sR = tot - sL; qR = tot2 - qL
+        sse = (qL - sL * sL / nL) + (qR - sR * sR / nR)
+        if sse < best:
+            best, bi = sse, i
+    return d <= float((s[bi - 1] + s[bi]) / 2)
 
 def Spotselect(self, x0_pred, image_latents, threshold=0.1, method='L4', image_size=(1024, 1024)):
     """
@@ -44,24 +73,13 @@ def Spotselect(self, x0_pred, image_latents, threshold=0.1, method='L4', image_s
         reuse = sim_score > threshold
         return reuse
     elif method == 'LPIPS':
-        if not hasattr(self, '_lpips_metric'):
-            self.vae.to(self._execution_device)
-            self._lpips_metric = QwenTokenLPIPS(self.vae, patch_size=2, t_index=0)
-        if self._lpips_metric._z2_cached is None:
-            self._lpips_metric.set_reference_z2(
-                image_latents,
-                image_size=image_size,
-                vae_downsample_factor=8,
-            )
-        token_scores = self._lpips_metric(
-            x0_pred,
-            image_latents,
-            image_size=image_size,
-            vae_downsample_factor=8,
-            use_cache=True
-        )
-        reuse = token_scores.mean(dim=0) < threshold
+        reuse = _lpips_token_score(self, x0_pred, image_latents, image_size) < threshold
         return reuse
+    elif method == 'LPIPS_kmeans':
+        # same LPIPS score as 'LPIPS', but the reuse/recompute cut is chosen adaptively per step
+        # by 1D k-means (k=2) instead of the fixed `threshold` (threshold is kept only as the
+        # full-reuse guard fallback in select_reuse_mask).
+        return _kmeans2_reuse(_lpips_token_score(self, x0_pred, image_latents, image_size))
 
 def dilate_uncached_mask(reuse_mask: torch.Tensor, H_lat: int, W_lat: int, 
                                    dilation_radius: int = 1) -> torch.Tensor:
