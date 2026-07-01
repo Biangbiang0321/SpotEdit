@@ -11,7 +11,7 @@ from .FLUX2LPIPS import FLUX2VAETokenLPIPS
 @dataclass
 class SpotEditConfig:
     # ---- cache decision ----
-    threshold: float = 0.2
+    threshold: float = 0.4
     judge_method: str = "LPIPS"
     initial_steps: int = 4
     reset_steps: list = field(default_factory=lambda: [13, 22, 31])
