@@ -66,6 +66,9 @@ Each step, SpotEdit assigns every token a per-token LPIPS-like edit score `d` (l
 ### limitation
 1. SpotEdit is not intended for global edits that affect most or all regions of the image, such as full-scene style transfer or global color changes. In these cases, SpotEdit cannot reliably identify non-edited regions, and thus falls back to computation that is effectively equivalent to the original full-image diffusion process.
 
+## 🚧 TODO
+- [ ] ComfyUI integration — wrap SpotEdit as a ComfyUI custom node / workflow so it can be used inside ComfyUI pipelines.
+
 ## Generated samples  
 <div align="center">
   <img src="asset/more_results.jpg"></img>
