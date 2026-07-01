@@ -13,7 +13,9 @@ class SpotEditConfig:
     initial_steps: int = 4
     reset_steps:  list = field(default_factory=lambda: [13,22,31])
     dilation_radius: int = 1
-    
+    reuse_mode: str = "velocity"   # "velocity": reused tokens flow to source each step (smooth, no seam);
+    #                                "overwrite": hard-paste source latents onto reused tokens at the end.
+
 def seed_everything(seed: int = 42):
     """
     Set the seed for reproducibility.

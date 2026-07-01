@@ -25,7 +25,9 @@ class SpotEditConfig:
     initial_steps: int = 4
     reset_steps: list = field(default_factory=lambda: [13, 22, 31])
     dilation_radius: int = 0
-    
+    reuse_mode: str = "velocity"   # "velocity": reused tokens flow to source each step (smooth, no seam);
+    #                                "overwrite": hard-paste source latents onto reused tokens at the end.
+
 
 def SpotSelect(self, x0_pred, image_latents, threshold=0.1, method='L4', metric=None,
                image_size=(1024, 1024)):

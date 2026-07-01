@@ -52,7 +52,8 @@ def generate(
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         max_sequence_length: int = 512,
-        config: SpotEditConfig = SpotEditConfig()
+        config: SpotEditConfig = SpotEditConfig(),
+        aux: Optional[dict] = None,
 ):
     image_size = image[0].size if isinstance(image, list) else image.size
     calculated_width, calculated_height, _ = calculate_dimensions(1024 * 1024, image_size[0] / image_size[1])
@@ -299,7 +300,13 @@ def generate(
                 #update the noise prediction only for edited tokens
                 if cache_flags[1].any():
                     uncached_n = cache_flags[1].logical_not().sum().item()
-                    noisy_copy = last_noise_pred.clone()
+                    if config.reuse_mode == "velocity" and image_latents is not None:
+                        # reused (non-edited) tokens flow straight to the source image:
+                        # v = (x_t - x0_orig)/sigma  =>  x0_pred = x_t - sigma*v = x0_orig.
+                        sigma = t.item() / 1000
+                        noisy_copy = (latents - image_latents) / sigma
+                    else:
+                        noisy_copy = last_noise_pred.clone()
                     noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
                     noise_pred = noisy_copy
                 else:
@@ -326,10 +333,19 @@ def generate(
                     xm.mark_step()
 
         self._current_timestep = None
-        # For non-edited tokens, we explicitly overwrite the generated latents with the original latents
-        # if cache_final.any():
-        #     latents[:, cache_final] = image_latents[:, cache_final]
-        print('updated')
+        # "overwrite": hard-paste source latents onto reused tokens; "velocity" already flowed them
+        # to the source during the loop, so it keeps the generated latents (smooth, no seam).
+        if cache_final.any() and config.reuse_mode == "overwrite":
+            latents[:, cache_final] = image_latents[:, cache_final]
+
+        H_lat = height // self.vae_scale_factor // 2
+        W_lat = width // self.vae_scale_factor // 2
+        # expose the final reuse mask (True = reused / non-edited token) on the latent grid
+        if aux is not None:
+            aux["reuse_mask"] = cache_final.detach().to("cpu").clone()
+            aux["H_lat"] = H_lat
+            aux["W_lat"] = W_lat
+
         if output_type == "latent":
             image = latents
         else:

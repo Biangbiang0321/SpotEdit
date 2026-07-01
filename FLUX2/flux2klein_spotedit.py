@@ -196,8 +196,12 @@ def generate(
 
                 if cache_flags[1].any():
                     uncached_n = cache_flags[1].logical_not().sum().item()
-                    sigma = t.item() / 1000  # reused tokens flow straight to the source: v=(x_t-x0_orig)/sigma
-                    noisy_copy = (latents - ref_image_latents) / sigma
+                    if config.reuse_mode == "velocity" and ref_image_latents is not None:
+                        # reused tokens flow straight to the source: v=(x_t-x0_orig)/sigma
+                        sigma = t.item() / 1000
+                        noisy_copy = (latents - ref_image_latents) / sigma
+                    else:
+                        noisy_copy = last_noise_pred.clone()
                     noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
                     noise_pred = noisy_copy
                 else:
