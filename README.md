@@ -40,8 +40,11 @@ pip install -r requirements.txt
 ```
 
 ### Usage example
-1. For Flux-Kontext basemodel: `example\flux.ipynb`
-2. For Qwen-Image-Edit basemodel: `example\qwen.ipynb`
+Ready-to-run notebooks live in `examples/`, one per backbone. Each one loads the pipeline, runs SpotEdit alongside a full-compute baseline for comparison, and visualizes the reused (non-edited) region.
+1. **FLUX.1-Kontext-dev** — `examples/flux.ipynb`
+2. **Qwen-Image-Edit** (base) — `examples/qwen.ipynb`
+3. **Qwen-Image-Edit-Plus** (2509 / 2511) — `examples/qwen_plus.ipynb`
+4. **FLUX.2 [klein]** — `examples/flux2.ipynb` (needs `diffusers>=0.37`)
 
 ### Guidelines for Spotedit
 1. Experiments and test examples are typically conducted at a resolution of 1024×1024. We recommend setting both input and output image sizes to 1024×1024 when running SpotEdit.
