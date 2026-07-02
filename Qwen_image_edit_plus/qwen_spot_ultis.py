@@ -16,6 +16,9 @@ class SpotEditConfig:
     reset_steps: list = field(default_factory=lambda: [13, 22, 31])
     dilation_radius: int = 1
     select_every_step: bool = False  # recompute the reuse mask every spotedit step (vs once per reset block)
+    compute_mode: str = "sliced"     # "sliced": transformer only sees non-reused tokens (speed);
+    #                                  "full": transformer sees every token and the judged mask only drives
+    #                                  the write-back -- quality mode for few-step/distilled (Lightning) models.
     # ---- how non-edited (reused) tokens are kept faithful to the source ----
     # "velocity": each step set reused tokens' velocity = (x_t - x0_orig)/sigma so they flow
     #             straight to the original (smooth, no seam) -- recommended.

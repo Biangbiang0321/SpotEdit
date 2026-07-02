@@ -155,6 +155,7 @@ def generate(
         x0_preds = []
         last_noise_pred = None
         cache_final = torch.zeros((latent_n), dtype=torch.bool, device=device)
+        ac = 0
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -164,16 +165,21 @@ def generate(
                     if i in config.reset_steps or i < config.initial_steps:
                         cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
                         cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
+                        ac = 0
                     else:
-                        # on full-reuse, lower threshold + re-judge so some tokens stay uncached
-                        cache_flags[1] = select_reuse_mask(self, x0_preds[-1], ref_image_latents, H_lat, W_lat,
-                                                           threshold=config.threshold, method=config.judge_method,
-                                                           image_size=(height, width), dilation_radius=config.dilation_radius)
-                        if cache_flags[1].any():
-                            cache_final = cache_flags[1]
-                            cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)
-                        else:
-                            cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
+                        ac += 1
+                        # judge once per reset block (matches the Qwen backbones); the mask is
+                        # stable between resets, so re-judging every step only adds VAE decodes.
+                        if config.select_every_step or ac == 1:
+                            # on full-reuse, lower threshold + re-judge so some tokens stay uncached
+                            cache_flags[1] = select_reuse_mask(self, x0_preds[-1], ref_image_latents, H_lat, W_lat,
+                                                               threshold=config.threshold, method=config.judge_method,
+                                                               image_size=(height, width), dilation_radius=config.dilation_radius)
+                            if cache_flags[1].any():
+                                cache_final = cache_flags[1]
+                                cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)
+                            else:
+                                cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
                         cache_flags[-1] = t.item() / 1000
 
                 self._current_timestep = t

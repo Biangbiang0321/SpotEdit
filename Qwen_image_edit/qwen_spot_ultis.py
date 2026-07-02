@@ -13,8 +13,12 @@ class SpotEditConfig:
     initial_steps: int = 4
     reset_steps:  list = field(default_factory=lambda: [13,22,31])
     dilation_radius: int = 1
+    select_every_step: bool = False  # recompute the reuse mask every spotedit step (vs once per reset block)
     reuse_mode: str = "velocity"   # "velocity": reused tokens flow to source each step (smooth, no seam);
     #                                "overwrite": hard-paste source latents onto reused tokens at the end.
+    compute_mode: str = "sliced"   # "sliced": transformer only sees non-reused tokens (speed);
+    #                                "full": transformer sees every token and the judged mask only drives
+    #                                the write-back -- quality mode for few-step/distilled (Lightning) models.
 
 def seed_everything(seed: int = 42):
     """

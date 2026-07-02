@@ -169,6 +169,7 @@ def generate(
         cache_final = torch.zeros((latent_n), dtype=torch.bool, device=device)
 
         total_cached_tokens, total_latent_tokens = 0, 0
+        ac = 0
 
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -181,25 +182,30 @@ def generate(
                         cache_flags[2] = torch.zeros(
                             (image_n), dtype=torch.bool, device=device
                         )
+                        ac = 0
                     #for spotedit steps, we do selective computation
                     else:
-                        # on full-reuse, lower threshold + re-judge so some tokens stay uncached
-                        cache_flags[1] = select_reuse_mask(
-                            self, x0_preds[-1], image_latents,
-                            height // self.vae_scale_factor // 2, width // self.vae_scale_factor // 2,
-                            threshold=config.threshold, method=config.judge_method,
-                            image_size=(height, width), dilation_radius=config.dilation_radius,
-                        )
+                        ac += 1
+                        # judge once per reset block (matches the Qwen backbones); the mask is
+                        # stable between resets, so re-judging every step only adds VAE decodes.
+                        if config.select_every_step or ac == 1:
+                            # on full-reuse, lower threshold + re-judge so some tokens stay uncached
+                            cache_flags[1] = select_reuse_mask(
+                                self, x0_preds[-1], image_latents,
+                                height // self.vae_scale_factor // 2, width // self.vae_scale_factor // 2,
+                                threshold=config.threshold, method=config.judge_method,
+                                image_size=(height, width), dilation_radius=config.dilation_radius,
+                            )
 
-                        if cache_flags[1].any():
-                            cache_final = cache_flags[1]
-                            cache_flags[2] = torch.ones(
-                                (image_n), dtype=torch.bool, device=device
-                            )
-                        else:
-                            cache_flags[2] = torch.zeros(
-                                (image_n), dtype=torch.bool, device=device
-                            )
+                            if cache_flags[1].any():
+                                cache_final = cache_flags[1]
+                                cache_flags[2] = torch.ones(
+                                    (image_n), dtype=torch.bool, device=device
+                                )
+                            else:
+                                cache_flags[2] = torch.zeros(
+                                    (image_n), dtype=torch.bool, device=device
+                                )
 
                         cache_flags[-1] = t.item() / 1000
                         cached_token_n = cache_flags[1].sum().item()
