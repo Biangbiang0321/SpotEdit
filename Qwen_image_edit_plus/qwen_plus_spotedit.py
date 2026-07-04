@@ -270,6 +270,15 @@ def generate(
                 if self.interrupt:
                     continue
 
+                _hyb_full = bool(config.full_last_steps
+                                 and i >= num_inference_steps - config.full_last_steps)
+                if _hyb_full and cache_flags[1].any():
+                    # hybrid schedule: entering the final full-compute window -- park the
+                    # sliced mask so it keeps driving the write-back only
+                    judge_mask = cache_flags[1].clone()
+                    cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
+                    cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
+
                 sel_dt = 0.0
 
                 # for the initial and reset steps, we do full computation
@@ -299,7 +308,7 @@ def generate(
                             cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)
                         else:
                             cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
-                        if config.compute_mode == "full":
+                        if config.compute_mode == "full" or _hyb_full:
                             # full-compute: keep feeding every token through the transformer (same
                             # path as the initial steps); the judged mask only drives the velocity
                             # write-back below. Quality mode for few-step/distilled models.
@@ -351,7 +360,7 @@ def generate(
                           f"transformer={tf_dt*1000:6.1f}ms", flush=True)
 
                 # update the noise prediction only for edited (uncached) tokens
-                _full = config.compute_mode == "full"
+                _full = config.compute_mode == "full" or _hyb_full
                 wb_mask = judge_mask if _full else cache_flags[1]
                 if wb_mask.any():
                     if config.reuse_mode == "velocity" and ref_image_latents is not None:

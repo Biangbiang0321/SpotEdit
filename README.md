@@ -69,6 +69,9 @@ Each step, SpotEdit assigns every token a per-token LPIPS-like edit score `d` (l
 - `"sliced"` *(default)*: the transformer only processes the non-reused tokens — this is the speed-oriented mode described above.
 - `"full"`: the transformer still processes every token, and the judged reuse mask only drives the velocity write-back that keeps non-edited regions faithful to the source. There is no speed gain (roughly baseline cost plus the judge), but the edit quality matches the plain pipeline while non-edited regions stay pinned to the input. This tends to be the more interesting mode when the base model is already fast — e.g. with few-step distilled LoRAs such as Qwen-Image-Edit-Lightning (4/8 steps), where in our tests it reduced the drift of non-edited regions by several times at roughly the baseline cost. For few-step models, also scale the step schedule down, e.g. `SpotEditConfig(initial_steps=1, reset_steps=[], compute_mode="full")` at 4 steps.
 
+**`full_last_steps` — hybrid schedule** *(Qwen-Image-Edit and Qwen-Image-Edit-Plus)*
+Run the first steps in `"sliced"` mode and only the last K steps in full-compute mode, so the whole image settles together at the end (`0` = off). In our few-step Lightning tests this removed most sliced-mode boundary artifacts at a fraction of the full-mode cost — e.g. `SpotEditConfig(initial_steps=1, reset_steps=[], full_last_steps=1)` at 4 steps.
+
 **`select_every_step` — how often the reuse mask is re-judged**
 By default every backbone now judges once per reset block (after `initial_steps` and after each entry of `reset_steps`) rather than at every step: the mask is stable between resets, and each judge call costs an extra VAE decode. In our measurements, per-step re-judging produced visually identical outputs while being slower. Set `select_every_step=True` to restore per-step judging.
 
@@ -76,7 +79,7 @@ By default every backbone now judges once per reset block (after `initial_steps`
 1. SpotEdit is not intended for global edits that affect most or all regions of the image, such as full-scene style transfer or global color changes. In these cases, SpotEdit cannot reliably identify non-edited regions, and thus falls back to computation that is effectively equivalent to the original full-image diffusion process.
 
 ## 🚧 TODO
-- [ ] ComfyUI integration — wrap SpotEdit as a ComfyUI custom node / workflow so it can be used inside ComfyUI pipelines.
+- [x] ComfyUI integration (experimental) — an all-in-one custom node for the Qwen family lives in [`comfyui/`](comfyui/README.md) (diffusers-backed; supports Lightning LoRAs, scaled-fp8 checkpoints, and the quality / hybrid / speed modes). Native MODEL-patch integration is still planned.
 
 ## Generated samples  
 <div align="center">

@@ -19,6 +19,9 @@ class SpotEditConfig:
     compute_mode: str = "sliced"   # "sliced": transformer only sees non-reused tokens (speed);
     #                                "full": transformer sees every token and the judged mask only drives
     #                                the write-back -- quality mode for few-step/distilled (Lightning) models.
+    full_last_steps: int = 0       # hybrid schedule: run the last K steps in full-compute mode so the
+    #                                whole image settles together (0 = off). With compute_mode="sliced"
+    #                                this recovers most of the "full" quality at a fraction of its cost.
 
 def seed_everything(seed: int = 42):
     """
