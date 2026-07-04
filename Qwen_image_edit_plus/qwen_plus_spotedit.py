@@ -303,6 +303,19 @@ def generate(
                                 threshold=config.threshold, method=config.judge_method,
                                 image_size=(height, width), dilation_radius=config.dilation_radius,
                             )
+                        if config.manual_reuse_mask is not None:
+                            _manual = torch.as_tensor(config.manual_reuse_mask,
+                                                      device=device).reshape(-1).bool()
+                            if config.manual_mask_policy == "intersect":
+                                cache_flags[1] = cache_flags[1] & _manual
+                            elif config.manual_mask_policy == "union":
+                                cache_flags[1] = cache_flags[1] | _manual
+                            else:  # "replace"
+                                cache_flags[1] = _manual
+                            if cache_flags[1].all() and config.compute_mode != "full":
+                                # keep at least one token computed (empty-query RoPE crash guard)
+                                cache_flags[1] = cache_flags[1].clone()
+                                cache_flags[1][0] = False
                         if cache_flags[1].any():
                             cache_final = cache_flags[1]
                             cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)
@@ -315,6 +328,11 @@ def generate(
                             judge_mask = cache_flags[1].clone()
                             cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
                             cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
+                        if config.preview_after_judge:
+                            # interactive preview: stop here and let the standard tail decode the
+                            # x0 draft; aux exposes the judged mask for editing
+                            latents = x0_preds[-1]
+                            break
                         if step_timing:
                             torch.cuda.synchronize(); sel_dt = time.perf_counter() - _t_sel
                     ac += 1

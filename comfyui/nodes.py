@@ -41,6 +41,24 @@ def _letterbox(pil: Image.Image, size: int = 1024) -> Image.Image:
     return canvas
 
 
+def _comfy_mask_to_reuse(mask: torch.Tensor) -> torch.Tensor:
+    """ComfyUI MASK [B,H,W] (1 = painted = REGENERATE) -> flat latent-grid reuse mask.
+    A 16x16-pixel token is marked regenerate if any of its pixels are painted."""
+    m = mask[0].float()
+    if m.shape != (1024, 1024):
+        m = torch.nn.functional.interpolate(m[None, None], size=(1024, 1024), mode='nearest')[0, 0]
+    regen = torch.nn.functional.max_pool2d(m[None, None], 16)[0, 0] > 0.5   # [64, 64]
+    return (~regen).reshape(-1).cpu()
+
+
+def _blue_overlay(img: Image.Image, reuse_flat: torch.Tensor, h_lat: int, w_lat: int) -> Image.Image:
+    arr = np.asarray(img, np.float32)
+    regen = np.kron(~reuse_flat.numpy().reshape(h_lat, w_lat), np.ones((16, 16), dtype=bool))
+    blue = np.array([60, 110, 255], np.float32)
+    arr[regen] = 0.55 * arr[regen] + 0.45 * blue
+    return Image.fromarray(arr.astype(np.uint8))
+
+
 def _auto_schedule(steps: int) -> dict:
     """Scale the 50-step default judge schedule down to few-step models."""
     if steps <= 6:
@@ -112,6 +130,12 @@ class SpotEditQwenEdit:
                 "true_cfg_scale": ("FLOAT", {"default": 1.0, "min": 1.0, "max": 10.0, "step": 0.1}),
                 "letterbox": ("BOOLEAN", {"default": True}),
                 "cpu_offload": ("BOOLEAN", {"default": False}),
+                "manual_mask": ("MASK", {"tooltip":
+                                "painted regions (white) are REGENERATED, the rest is kept. "
+                                "Paint on the Judge Preview output so it lines up with the token grid."}),
+                "mask_policy": (["replace", "union", "intersect"], {"default": "replace", "tooltip":
+                                "how the manual mask meets the judge: replace = use it as-is; union = "
+                                "regenerate where either says so; intersect = only where both agree"}),
             },
         }
 
@@ -122,7 +146,7 @@ class SpotEditQwenEdit:
 
     def edit(self, image, prompt, model, mode, steps, seed, lightning,
              lora_path="", fp8_checkpoint="", true_cfg_scale=1.0,
-             letterbox=True, cpu_offload=False):
+             letterbox=True, cpu_offload=False, manual_mask=None, mask_policy="replace"):
         # ComfyUI IMAGE: [B, H, W, C] float 0..1
         arr = (image[0].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
         pil = Image.fromarray(arr)
@@ -147,6 +171,14 @@ class SpotEditQwenEdit:
         else:
             cfg_kw["compute_mode"] = "sliced"
 
+        if manual_mask is not None:
+            cfg_kw["manual_reuse_mask"] = _comfy_mask_to_reuse(manual_mask)
+            # the UI speaks in regenerate-regions; the library combines REUSE masks,
+            # so union/intersect swap when translated
+            cfg_kw["manual_mask_policy"] = {"replace": "replace",
+                                            "union": "intersect",
+                                            "intersect": "union"}[mask_policy]
+
         aux = {}
         res = generate(pipe, image=img_arg, prompt=prompt, config=SpotEditConfig(**cfg_kw),
                        num_inference_steps=steps, true_cfg_scale=true_cfg_scale,
@@ -160,5 +192,80 @@ class SpotEditQwenEdit:
         return (out_t, mask_t)
 
 
-NODE_CLASS_MAPPINGS = {"SpotEditQwenEdit": SpotEditQwenEdit}
-NODE_DISPLAY_NAME_MAPPINGS = {"SpotEditQwenEdit": "SpotEdit Qwen Image Edit"}
+class SpotEditJudgePreview:
+    """Run only the first steps + judge, then return the decoded x0 draft, a blue
+    regenerate-region overlay, and the judge's mask — so you can inspect and repaint
+    the region before the real run (feed your mask into SpotEditQwenEdit.manual_mask)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "prompt": ("STRING", {"multiline": True, "default": "add a blue scarf"}),
+                "model": (MODELS, {"default": "Qwen/Qwen-Image-Edit-2511"}),
+                "steps": ("INT", {"default": 8, "min": 1, "max": 100,
+                                  "tooltip": "total steps of the FINAL run (keeps the noise schedule identical)"}),
+                "seed": ("INT", {"default": 125, "min": 0, "max": 2**31 - 1}),
+                "lightning": ("BOOLEAN", {"default": True}),
+                "judge_step": ("INT", {"default": 1, "min": 1, "max": 4,
+                                       "tooltip": "which step the judge fires at (1 = after the first step; "
+                                                  "later judges see a cleaner draft but cost more)"}),
+            },
+            "optional": {
+                "lora_path": ("STRING", {"default": ""}),
+                "fp8_checkpoint": ("STRING", {"default": ""}),
+                "true_cfg_scale": ("FLOAT", {"default": 1.0, "min": 1.0, "max": 10.0, "step": 0.1}),
+                "letterbox": ("BOOLEAN", {"default": True}),
+                "cpu_offload": ("BOOLEAN", {"default": False}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "IMAGE", "MASK")
+    RETURN_NAMES = ("x0_preview", "overlay", "regen_mask")
+    FUNCTION = "preview"
+    CATEGORY = "SpotEdit"
+
+    def preview(self, image, prompt, model, steps, seed, lightning, judge_step=1,
+                lora_path="", fp8_checkpoint="", true_cfg_scale=1.0,
+                letterbox=True, cpu_offload=False):
+        arr = (image[0].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+        pil = Image.fromarray(arr)
+        if letterbox:
+            pil = _letterbox(pil, 1024)
+
+        pipe = _get_pipeline(model, fp8_checkpoint, lora_path, lightning, cpu_offload)
+
+        if model == "Qwen/Qwen-Image-Edit":
+            from Qwen_image_edit import generate, SpotEditConfig
+            img_arg = pil
+        else:
+            from Qwen_image_edit_plus import generate, SpotEditConfig
+            img_arg = [pil]
+
+        aux = {}
+        res = generate(pipe, image=img_arg, prompt=prompt,
+                       config=SpotEditConfig(initial_steps=judge_step, reset_steps=[],
+                                             preview_after_judge=True),
+                       num_inference_steps=steps, true_cfg_scale=true_cfg_scale,
+                       generator=torch.manual_seed(seed), aux=aux)
+        draft = res.images[0]
+
+        reuse = aux["reuse_mask"]
+        h_lat, w_lat = aux["H_lat"], aux["W_lat"]
+        overlay = _blue_overlay(draft, reuse, h_lat, w_lat)
+
+        draft_t = torch.from_numpy(np.asarray(draft, np.float32) / 255.0)[None]
+        overlay_t = torch.from_numpy(np.asarray(overlay, np.float32) / 255.0)[None]
+        regen = np.kron(~reuse.numpy().reshape(h_lat, w_lat), np.ones((16, 16), dtype=np.float32))
+        return (draft_t, overlay_t, torch.from_numpy(regen)[None])
+
+
+NODE_CLASS_MAPPINGS = {
+    "SpotEditQwenEdit": SpotEditQwenEdit,
+    "SpotEditJudgePreview": SpotEditJudgePreview,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "SpotEditQwenEdit": "SpotEdit Qwen Image Edit",
+    "SpotEditJudgePreview": "SpotEdit Judge Preview",
+}

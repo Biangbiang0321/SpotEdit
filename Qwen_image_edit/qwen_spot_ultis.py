@@ -22,6 +22,13 @@ class SpotEditConfig:
     full_last_steps: int = 0       # hybrid schedule: run the last K steps in full-compute mode so the
     #                                whole image settles together (0 = off). With compute_mode="sliced"
     #                                this recovers most of the "full" quality at a fraction of its cost.
+    # ---- interactive / manual region control ----
+    manual_reuse_mask: object = None  # optional latent-grid mask (flat or [H_lat, W_lat]; True/1 = keep
+    #                                   as-is, False/0 = regenerate). Combined with the judge's decision
+    #                                   per manual_mask_policy at every judge point.
+    manual_mask_policy: str = "replace"  # "replace" | "intersect" | "union" (how it meets the judge mask)
+    preview_after_judge: bool = False    # stop right after the first judge and return the decoded x0
+    #                                      draft (aux gets the mask) -- powers interactive mask editing.
 
 def seed_everything(seed: int = 42):
     """

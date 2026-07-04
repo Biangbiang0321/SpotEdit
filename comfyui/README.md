@@ -43,6 +43,27 @@ Restart ComfyUI; the node appears as **SpotEdit Qwen Image Edit** (category `Spo
 - `regen_mask` — the judged regenerated-region mask (1 = regenerated), ready for previews
   or downstream compositing.
 
+## Interactive region control (Judge Preview)
+
+`SpotEdit Judge Preview` lets you see and override the judge's decision *before* the real run:
+
+1. Feed your image + prompt into **SpotEdit Judge Preview**. It runs only the first
+   `judge_step` steps plus one judge pass (a couple of seconds with Lightning) and returns:
+   - `x0_preview` — the model's decoded x0 draft at that step,
+   - `overlay` — the same draft with the proposed regenerate-region tinted blue,
+   - `regen_mask` — the judge's mask as a MASK.
+2. Decide the region yourself: paint a mask on the preview (Copy → Clipspace → paste into a
+   `LoadImage` node → *Open in MaskEditor*), or modify `regen_mask` with the standard mask nodes
+   (`GrowMask`, `MaskComposite`, `InvertMask`, ...). **White = regenerate, black = keep.**
+3. Connect your mask to `SpotEditQwenEdit.manual_mask` and pick a `mask_policy`:
+   - `replace` — your mask is the final decision (the judge is overridden),
+   - `union` — regenerate wherever *either* you or the judge says so,
+   - `intersect` — regenerate only where *both* agree.
+
+Keep `seed`/`steps`/model settings identical between the preview and the final run so the
+draft you annotated matches the trajectory of the real generation. Masks are consumed on the
+16×16-pixel token grid (a token is regenerated if any of its pixels are painted).
+
 ## Notes
 
 - Judge schedule is scaled automatically from the step count (`initial_steps=1` and no resets
