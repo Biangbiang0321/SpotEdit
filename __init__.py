@@ -7,8 +7,10 @@ this file is inert: the backbone packages are still imported directly, e.g.
 """
 try:
     from .comfyui.nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+    WEB_DIRECTORY = "./comfyui/web"  # served at /extensions/<pkg>/ for custom JS widgets
 except Exception:  # missing ComfyUI-side deps must not break library usage
     NODE_CLASS_MAPPINGS = {}
     NODE_DISPLAY_NAME_MAPPINGS = {}
+    WEB_DIRECTORY = None
 
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

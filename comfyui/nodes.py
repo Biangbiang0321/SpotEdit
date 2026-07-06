@@ -261,11 +261,81 @@ class SpotEditJudgePreview:
         return (draft_t, overlay_t, torch.from_numpy(regen)[None])
 
 
+class SpotEditGridMask:
+    """Click a token grid over the draft to pick which 16x16 blocks regenerate.
+
+    Outputs a MASK (white = selected = REGENERATE) to feed SpotEditQwenEdit.manual_mask
+    (mask_policy=replace). The clickable grid lives in the JS widget (web/spotedit_gridmask.js);
+    this node parses the widget's `cells` bit-string and rasterises it to a full-res mask.
+    An optional `init_mask` (e.g. the Judge Preview regen_mask) seeds the grid on first run."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE", {"tooltip": "the draft to click on (e.g. Judge Preview x0/overlay)"}),
+                "cols": ("INT", {"default": 64, "min": 1, "max": 256}),
+                "rows": ("INT", {"default": 64, "min": 1, "max": 256}),
+                "cells": ("STRING", {"default": "", "tooltip": "driven by the grid widget; row-major 0/1"}),
+            },
+            "optional": {
+                "init_mask": ("MASK", {"tooltip": "seed the grid from this mask on the first run"}),
+            },
+        }
+
+    RETURN_TYPES = ("MASK",)
+    RETURN_NAMES = ("mask",)
+    FUNCTION = "build"
+    CATEGORY = "SpotEdit"
+    OUTPUT_NODE = True
+
+    def build(self, image, cols, rows, cells, init_mask=None):
+        import os
+        import uuid
+        import folder_paths
+
+        _, H, W, _ = image.shape
+        grid = None
+        if cells and len(cells) == rows * cols:
+            grid = (np.frombuffer(cells.encode("ascii"), dtype=np.uint8) == ord("1")).reshape(rows, cols)
+        seed_cells = ""
+        if grid is None:
+            grid = np.zeros((rows, cols), dtype=bool)
+            if init_mask is not None:
+                m = init_mask
+                if m.dim() == 2:
+                    m = m[None]
+                pooled = torch.nn.functional.adaptive_max_pool2d(m[:1].float().unsqueeze(1), (rows, cols))
+                grid = pooled[0, 0].cpu().numpy() > 0.5
+                seed_cells = "".join("1" if v else "0" for v in grid.reshape(-1))
+
+        cell_h, cell_w = max(1, H // rows), max(1, W // cols)
+        up = np.kron(grid.astype(np.float32), np.ones((cell_h, cell_w), np.float32))
+        mask = np.zeros((H, W), np.float32)
+        hh, ww = min(H, up.shape[0]), min(W, up.shape[1])
+        mask[:hh, :ww] = up[:hh, :ww]
+        mask_t = torch.from_numpy(mask)[None]
+
+        # save the background so the JS grid widget can render the draft under the cells
+        arr = (image[0].clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
+        tmp = folder_paths.get_temp_directory()
+        os.makedirs(tmp, exist_ok=True)
+        fname = f"spotedit_grid_{uuid.uuid4().hex[:12]}.png"
+        Image.fromarray(arr).save(os.path.join(tmp, fname))
+        ui = {
+            "images": [{"filename": fname, "subfolder": "", "type": "temp"}],
+            "spotedit_grid": [{"rows": rows, "cols": cols, "seed_cells": seed_cells}],
+        }
+        return {"ui": ui, "result": (mask_t,)}
+
+
 NODE_CLASS_MAPPINGS = {
     "SpotEditQwenEdit": SpotEditQwenEdit,
     "SpotEditJudgePreview": SpotEditJudgePreview,
+    "SpotEditGridMask": SpotEditGridMask,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SpotEditQwenEdit": "SpotEdit Qwen Image Edit",
     "SpotEditJudgePreview": "SpotEdit Judge Preview",
+    "SpotEditGridMask": "SpotEdit Grid Mask",
 }
