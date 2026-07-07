@@ -295,19 +295,27 @@ class SpotEditGridMask:
         import folder_paths
 
         _, H, W, _ = image.shape
+
+        # the judge suggestion, always recomputed from init_mask (independent of the
+        # user's current selection) so the JS widget can "reset to judge" any time.
+        judge_cells = ""
+        if init_mask is not None:
+            m = init_mask
+            if m.dim() == 2:
+                m = m[None]
+            pooled = torch.nn.functional.adaptive_max_pool2d(m[:1].float().unsqueeze(1), (rows, cols))
+            jg = pooled[0, 0].cpu().numpy() > 0.5
+            judge_cells = "".join("1" if v else "0" for v in jg.reshape(-1))
+
         grid = None
         if cells and len(cells) == rows * cols:
             grid = (np.frombuffer(cells.encode("ascii"), dtype=np.uint8) == ord("1")).reshape(rows, cols)
-        seed_cells = ""
         if grid is None:
-            grid = np.zeros((rows, cols), dtype=bool)
-            if init_mask is not None:
-                m = init_mask
-                if m.dim() == 2:
-                    m = m[None]
-                pooled = torch.nn.functional.adaptive_max_pool2d(m[:1].float().unsqueeze(1), (rows, cols))
-                grid = pooled[0, 0].cpu().numpy() > 0.5
-                seed_cells = "".join("1" if v else "0" for v in grid.reshape(-1))
+            # no explicit click selection yet -> default to the judge suggestion
+            if judge_cells:
+                grid = (np.frombuffer(judge_cells.encode("ascii"), dtype=np.uint8) == ord("1")).reshape(rows, cols)
+            else:
+                grid = np.zeros((rows, cols), dtype=bool)
 
         cell_h, cell_w = max(1, H // rows), max(1, W // cols)
         up = np.kron(grid.astype(np.float32), np.ones((cell_h, cell_w), np.float32))
@@ -324,7 +332,10 @@ class SpotEditGridMask:
         Image.fromarray(arr).save(os.path.join(tmp, fname))
         ui = {
             "images": [{"filename": fname, "subfolder": "", "type": "temp"}],
-            "spotedit_grid": [{"rows": rows, "cols": cols, "seed_cells": seed_cells}],
+            # seed_cells: adopted on the first run when the grid is empty.
+            # judge_cells: always the current judge suggestion, for the "reset to judge" button.
+            "spotedit_grid": [{"rows": rows, "cols": cols,
+                               "seed_cells": judge_cells, "judge_cells": judge_cells}],
         }
         return {"ui": ui, "result": (mask_t,)}
 
