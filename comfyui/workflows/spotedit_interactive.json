@@ -1,0 +1,667 @@
+{
+  "last_node_id": 14,
+  "last_link_id": 16,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [
+        60,
+        200
+      ],
+      "size": [
+        300,
+        314
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1,
+            6
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "dog.jpg",
+        "image"
+      ],
+      "title": "\u6e90\u56fe"
+    },
+    {
+      "id": 2,
+      "type": "SpotEditJudgePreview",
+      "pos": [
+        400,
+        200
+      ],
+      "size": [
+        380,
+        440
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "x0_preview",
+          "type": "IMAGE",
+          "links": [
+            3,
+            14
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "overlay",
+          "type": "IMAGE",
+          "links": [
+            2
+          ],
+          "slot_index": 1
+        },
+        {
+          "name": "regen_mask",
+          "type": "MASK",
+          "links": [
+            4,
+            15
+          ],
+          "slot_index": 2
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SpotEditJudgePreview"
+      },
+      "widgets_values": [
+        "add a blue scarf",
+        "Qwen/Qwen-Image-Edit-2511",
+        4,
+        125,
+        "fixed",
+        true,
+        1,
+        "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "",
+        1.0,
+        true,
+        false
+      ],
+      "title": "\u2460 Judge \u9884\u89c8"
+    },
+    {
+      "id": 3,
+      "type": "PreviewImage",
+      "pos": [
+        820,
+        160
+      ],
+      "size": [
+        340,
+        340
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 2
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "\u53e0\u52a0\u9884\u89c8"
+    },
+    {
+      "id": 4,
+      "type": "PreviewImage",
+      "pos": [
+        820,
+        540
+      ],
+      "size": [
+        300,
+        300
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 3
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "x0 \u8349\u56fe"
+    },
+    {
+      "id": 5,
+      "type": "MaskToImage",
+      "pos": [
+        400,
+        700
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            5
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MaskToImage"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 6,
+      "type": "PreviewImage",
+      "pos": [
+        1180,
+        540
+      ],
+      "size": [
+        280,
+        280
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "Judge Mask"
+    },
+    {
+      "id": 13,
+      "type": "SpotEditGridMask",
+      "pos": [
+        60,
+        700
+      ],
+      "size": [
+        400,
+        640
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 14
+        },
+        {
+          "name": "init_mask",
+          "type": "MASK",
+          "link": 15
+        }
+      ],
+      "outputs": [
+        {
+          "name": "mask",
+          "type": "MASK",
+          "links": [
+            16
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SpotEditGridMask"
+      },
+      "widgets_values": [
+        64,
+        64,
+        ""
+      ],
+      "title": "\u2461 \u9009\u91cd\u7ed8\u533a \u00b7 \u70b9/\u62d6\u65b9\u5757"
+    },
+    {
+      "id": 7,
+      "type": "SpotEditQwenEdit",
+      "pos": [
+        460,
+        980
+      ],
+      "size": [
+        420,
+        540
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 6
+        },
+        {
+          "name": "manual_mask",
+          "type": "MASK",
+          "link": 16
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            7,
+            8,
+            10
+          ],
+          "slot_index": 0
+        },
+        {
+          "name": "regen_mask",
+          "type": "MASK",
+          "links": [
+            12
+          ],
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SpotEditQwenEdit"
+      },
+      "widgets_values": [
+        "add a blue scarf",
+        "Qwen/Qwen-Image-Edit-2511",
+        "quality (full)",
+        4,
+        125,
+        "fixed",
+        true,
+        "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "",
+        1.0,
+        true,
+        false,
+        "replace"
+      ],
+      "title": "\u2462 \u4e3b\u7f16\u8f91"
+    },
+    {
+      "id": 8,
+      "type": "PreviewImage",
+      "pos": [
+        940,
+        940
+      ],
+      "size": [
+        340,
+        340
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 7
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "\u6700\u7ec8\u7ed3\u679c"
+    },
+    {
+      "id": 9,
+      "type": "EmptyImage",
+      "pos": [
+        460,
+        1560
+      ],
+      "size": [
+        270,
+        130
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            9
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "EmptyImage"
+      },
+      "widgets_values": [
+        1024,
+        1024,
+        1,
+        16711680
+      ],
+      "title": "\u9ad8\u4eae\u8272"
+    },
+    {
+      "id": 10,
+      "type": "ImageBlend",
+      "pos": [
+        940,
+        1320
+      ],
+      "size": [
+        300,
+        150
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image1",
+          "type": "IMAGE",
+          "link": 8
+        },
+        {
+          "name": "image2",
+          "type": "IMAGE",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            11
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageBlend"
+      },
+      "widgets_values": [
+        0.5,
+        "normal"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "ImageCompositeMasked",
+      "pos": [
+        940,
+        1520
+      ],
+      "size": [
+        300,
+        170
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "destination",
+          "type": "IMAGE",
+          "link": 10
+        },
+        {
+          "name": "source",
+          "type": "IMAGE",
+          "link": 11
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            13
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageCompositeMasked"
+      },
+      "widgets_values": [
+        0,
+        0,
+        false
+      ]
+    },
+    {
+      "id": 12,
+      "type": "PreviewImage",
+      "pos": [
+        1300,
+        1320
+      ],
+      "size": [
+        340,
+        340
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 13
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "\u6700\u7ec8\u53e0\u52a0\u56fe"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "IMAGE"
+    ],
+    [
+      2,
+      2,
+      1,
+      3,
+      0,
+      "IMAGE"
+    ],
+    [
+      3,
+      2,
+      0,
+      4,
+      0,
+      "IMAGE"
+    ],
+    [
+      4,
+      2,
+      2,
+      5,
+      0,
+      "MASK"
+    ],
+    [
+      5,
+      5,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      6,
+      1,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      7,
+      7,
+      0,
+      8,
+      0,
+      "IMAGE"
+    ],
+    [
+      8,
+      7,
+      0,
+      10,
+      0,
+      "IMAGE"
+    ],
+    [
+      9,
+      9,
+      0,
+      10,
+      1,
+      "IMAGE"
+    ],
+    [
+      10,
+      7,
+      0,
+      11,
+      0,
+      "IMAGE"
+    ],
+    [
+      11,
+      10,
+      0,
+      11,
+      1,
+      "IMAGE"
+    ],
+    [
+      12,
+      7,
+      1,
+      11,
+      2,
+      "MASK"
+    ],
+    [
+      13,
+      11,
+      0,
+      12,
+      0,
+      "IMAGE"
+    ],
+    [
+      14,
+      2,
+      0,
+      13,
+      0,
+      "IMAGE"
+    ],
+    [
+      15,
+      2,
+      2,
+      13,
+      1,
+      "MASK"
+    ],
+    [
+      16,
+      13,
+      0,
+      7,
+      1,
+      "MASK"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

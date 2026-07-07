@@ -52,9 +52,14 @@ Restart ComfyUI; the node appears as **SpotEdit Qwen Image Edit** (category `Spo
    - `x0_preview` — the model's decoded x0 draft at that step,
    - `overlay` — the same draft with the proposed regenerate-region tinted blue,
    - `regen_mask` — the judge's mask as a MASK.
-2. Decide the region yourself: paint a mask on the preview (Copy → Clipspace → paste into a
-   `LoadImage` node → *Open in MaskEditor*), or modify `regen_mask` with the standard mask nodes
-   (`GrowMask`, `MaskComposite`, `InvertMask`, ...). **White = regenerate, black = keep.**
+2. Decide the region yourself — two ways:
+   - **SpotEdit Grid Mask** (recommended): feed it the `x0_preview` draft and (optionally) the
+     `regen_mask` as `init_mask`. It draws the draft under a clickable 16×16 token grid seeded
+     with the judge's suggestion; **click / drag cells** to toggle regenerate (red) vs keep, and
+     use `reset to judge` / `clear grid` / `invert grid`. Its `mask` output is the selection.
+   - Or paint a mask on the preview (Copy → Clipspace → paste into a `LoadImage` node → *Open in
+     MaskEditor*), or edit `regen_mask` with the standard mask nodes (`GrowMask`, `MaskComposite`,
+     `InvertMask`, ...). **White = regenerate, black = keep.**
 3. Connect your mask to `SpotEditQwenEdit.manual_mask` and pick a `mask_policy`:
    - `replace` — your mask is the final decision (the judge is overridden),
    - `union` — regenerate wherever *either* you or the judge says so,
@@ -63,6 +68,13 @@ Restart ComfyUI; the node appears as **SpotEdit Qwen Image Edit** (category `Spo
 Keep `seed`/`steps`/model settings identical between the preview and the final run so the
 draft you annotated matches the trajectory of the real generation. Masks are consumed on the
 16×16-pixel token grid (a token is regenerated if any of its pixels are painted).
+
+## Example workflows
+
+Ready-to-load graphs are in [`workflows/`](workflows/) — drag the `.json` onto the ComfyUI canvas:
+- `spotedit_qwen_edit.json` — one-shot edit + a red mask-overlay preview.
+- `spotedit_interactive.json` — Judge Preview → **Grid Mask** (click the region) → main edit,
+  with the mask overlaid on both the draft and the final result.
 
 ## Notes
 
