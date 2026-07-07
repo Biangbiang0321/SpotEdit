@@ -24,11 +24,55 @@ else:
     XLA_AVAILABLE = False
 logger = logging.get_logger(__name__)
 
-from .qwenSpotAttn import QwenSpotEditAttnProcessor
-from .qwen_spot_ultis import (
-    Spotselect, SpotEditConfig, dilate_uncached_mask, boundary_aware_smoothing, feather_composite,
+from Qwen_image_edit_plus.qwenSpotAttn import QwenSpotEditAttnProcessor
+from Qwen_image_edit_plus.qwen_spot_ultis import (
+    Spotselect, dilate_uncached_mask, boundary_aware_smoothing, feather_composite,
     select_reuse_mask,
 )
+
+# NOTE: self-contained copy for the ComfyUI integration. The backbone files
+# (Qwen_image_edit*/) are kept identical to main; all SpotEdit sampling features
+# (compute_mode / full_last_steps / manual mask / preview) live here instead.
+from dataclasses import dataclass, field
+
+@dataclass
+class SpotEditConfig:
+    # ---- cache decision ----
+    threshold: float = 0.15
+    judge_method: str = "LPIPS_kmeans"   # adaptive 1D-kmeans cut (was fixed-threshold "LPIPS")
+    initial_steps: int = 4
+    reset_steps: list = field(default_factory=lambda: [13, 22, 31])
+    dilation_radius: int = 1
+    select_every_step: bool = False  # recompute the reuse mask every spotedit step (vs once per reset block)
+    compute_mode: str = "sliced"     # "sliced": transformer only sees non-reused tokens (speed);
+    #                                  "full": transformer sees every token and the judged mask only drives
+    #                                  the write-back -- quality mode for few-step/distilled (Lightning) models.
+    full_last_steps: int = 0         # hybrid schedule: run the last K steps in full-compute mode so the
+    #                                  whole image settles together (0 = off). With compute_mode="sliced"
+    #                                  this recovers most of the "full" quality at a fraction of its cost.
+    # ---- interactive / manual region control ----
+    manual_reuse_mask: object = None  # optional latent-grid mask (flat or [H_lat, W_lat]; True/1 = keep
+    #                                   as-is, False/0 = regenerate). Combined with the judge's decision
+    #                                   per manual_mask_policy at every judge point.
+    manual_mask_policy: str = "replace"  # "replace" | "intersect" | "union" (how it meets the judge mask)
+    preview_after_judge: bool = False    # stop right after the first judge and return the decoded x0
+    #                                      draft (aux gets the mask) -- powers interactive mask editing.
+    # ---- how non-edited (reused) tokens are kept faithful to the source ----
+    # "velocity": each step set reused tokens' velocity = (x_t - x0_orig)/sigma so they flow
+    #             straight to the original (smooth, no seam) -- recommended.
+    # "feather" : keep generated latents, then blend the edit over the original in pixel space.
+    # "overwrite": GitHub default -- hard latent paste + boundary smoothing (leaves a seam).
+    reuse_mode: str = "velocity"
+    feather_tau: float = 0.10    # ("feather") content-diff threshold in [-1,1] image space
+    feather_sigma: float = 12.0  # ("feather") feather radius in pixels
+    # ---- initialisation ----
+    # 1.0 = start the denoised latents from pure noise (standard edit init).
+    # <1.0 = SDEdit/img2img: start from a noised source  x = (1-sigma)*x0_orig + sigma*noise
+    #        at sigma=strength, running only the last `strength` fraction of steps.
+    source_init_strength: float = 1.0
+
+
+
 
 # Qwen-Image-Edit-2509 encodes each reference image twice: a small one for the
 # text encoder (semantic conditioning) and a 1MP one for the VAE (pixel conditioning).
@@ -259,6 +303,8 @@ def generate(
 
         reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
         cache_final = torch.zeros((latent_n), dtype=torch.bool, device=device)
+        # judged reuse mask for compute_mode="full" (write-back only, no token slicing)
+        judge_mask = torch.zeros((latent_n), dtype=torch.bool, device=device)
         total_cached_tokens, total_latent_tokens = 0, 0
         ac = 0
         step_timing = bool(os.environ.get("SPOTEDIT_STEP_TIMING"))
@@ -268,6 +314,15 @@ def generate(
                 if self.interrupt:
                     continue
 
+                _hyb_full = bool(config.full_last_steps
+                                 and i >= num_inference_steps - config.full_last_steps)
+                if _hyb_full and cache_flags[1].any():
+                    # hybrid schedule: entering the final full-compute window -- park the
+                    # sliced mask so it keeps driving the write-back only
+                    judge_mask = cache_flags[1].clone()
+                    cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
+                    cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
+
                 sel_dt = 0.0
 
                 # for the initial and reset steps, we do full computation
@@ -275,6 +330,7 @@ def generate(
                     cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
                     cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
                     reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
+                    judge_mask = torch.zeros((latent_n), dtype=torch.bool, device=device)
                     ac = 0
                     ac += 1
                 # for spotedit steps: recompute the reuse mask either every step or once per reset block
@@ -291,11 +347,36 @@ def generate(
                                 threshold=config.threshold, method=config.judge_method,
                                 image_size=(height, width), dilation_radius=config.dilation_radius,
                             )
+                        if config.manual_reuse_mask is not None:
+                            _manual = torch.as_tensor(config.manual_reuse_mask,
+                                                      device=device).reshape(-1).bool()
+                            if config.manual_mask_policy == "intersect":
+                                cache_flags[1] = cache_flags[1] & _manual
+                            elif config.manual_mask_policy == "union":
+                                cache_flags[1] = cache_flags[1] | _manual
+                            else:  # "replace"
+                                cache_flags[1] = _manual
+                            if cache_flags[1].all() and config.compute_mode != "full":
+                                # keep at least one token computed (empty-query RoPE crash guard)
+                                cache_flags[1] = cache_flags[1].clone()
+                                cache_flags[1][0] = False
                         if cache_flags[1].any():
                             cache_final = cache_flags[1]
                             cache_flags[2] = torch.ones((image_n), dtype=torch.bool, device=device)
                         else:
                             cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
+                        if config.compute_mode == "full" or _hyb_full:
+                            # full-compute: keep feeding every token through the transformer (same
+                            # path as the initial steps); the judged mask only drives the velocity
+                            # write-back below. Quality mode for few-step/distilled models.
+                            judge_mask = cache_flags[1].clone()
+                            cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
+                            cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
+                        if config.preview_after_judge:
+                            # interactive preview: stop here and let the standard tail decode the
+                            # x0 draft; aux exposes the judged mask for editing
+                            latents = x0_preds[-1]
+                            break
                         if step_timing:
                             torch.cuda.synchronize(); sel_dt = time.perf_counter() - _t_sel
                     ac += 1
@@ -341,8 +422,9 @@ def generate(
                           f"transformer={tf_dt*1000:6.1f}ms", flush=True)
 
                 # update the noise prediction only for edited (uncached) tokens
-                if cache_flags[1].any():
-                    uncached_n = cache_flags[1].logical_not().sum().item()
+                _full = config.compute_mode == "full" or _hyb_full
+                wb_mask = judge_mask if _full else cache_flags[1]
+                if wb_mask.any():
                     if config.reuse_mode == "velocity" and ref_image_latents is not None:
                         # reused (non-edited) tokens flow straight to the original image:
                         # v = (x_t - x0_orig)/sigma  =>  x0_pred = x_t - sigma*v = x0_orig.
@@ -351,7 +433,13 @@ def generate(
                         noisy_copy = (latents - ref_image_latents) / sigma
                     else:
                         noisy_copy = last_noise_pred.clone()
-                    noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
+                    if _full:
+                        # full-compute: predictions cover every token in original order
+                        noisy_copy[:, wb_mask.logical_not()] = \
+                            noise_pred[:, : latents.size(1)][:, wb_mask.logical_not()]
+                    else:
+                        noisy_copy[:, wb_mask.logical_not()] = \
+                            noise_pred[:, : wb_mask.logical_not().sum().item()]
                     noise_pred = noisy_copy
                 else:
                     noise_pred = noise_pred[:, : latents.size(1)]

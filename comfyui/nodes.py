@@ -156,10 +156,10 @@ class SpotEditQwenEdit:
         pipe = _get_pipeline(model, fp8_checkpoint, lora_path, lightning, cpu_offload)
 
         if model == "Qwen/Qwen-Image-Edit":
-            from Qwen_image_edit import generate, SpotEditConfig
+            from .spot_qwen_edit import generate, SpotEditConfig
             img_arg = pil
         else:
-            from Qwen_image_edit_plus import generate, SpotEditConfig
+            from .spot_qwen_edit_plus import generate, SpotEditConfig
             img_arg = [pil]
 
         cfg_kw = _auto_schedule(steps)
@@ -237,10 +237,10 @@ class SpotEditJudgePreview:
         pipe = _get_pipeline(model, fp8_checkpoint, lora_path, lightning, cpu_offload)
 
         if model == "Qwen/Qwen-Image-Edit":
-            from Qwen_image_edit import generate, SpotEditConfig
+            from .spot_qwen_edit import generate, SpotEditConfig
             img_arg = pil
         else:
-            from Qwen_image_edit_plus import generate, SpotEditConfig
+            from .spot_qwen_edit_plus import generate, SpotEditConfig
             img_arg = [pil]
 
         aux = {}

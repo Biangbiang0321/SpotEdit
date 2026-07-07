@@ -25,7 +25,6 @@ class SpotEditConfig:
     initial_steps: int = 4
     reset_steps: list = field(default_factory=lambda: [13, 22, 31])
     dilation_radius: int = 0
-    select_every_step: bool = False  # recompute the reuse mask every spotedit step (vs once per reset block)
     reuse_mode: str = "velocity"   # "velocity": reused tokens flow to source each step (smooth, no seam);
     #                                "overwrite": hard-paste source latents onto reused tokens at the end.
 

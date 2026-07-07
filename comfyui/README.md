@@ -8,6 +8,12 @@ and Comfy-style scaled-fp8 checkpoints.
 > does not yet compose with ComfyUI's native model loaders / samplers. A native MODEL-patch
 > integration is planned.
 
+> Architecture: everything ComfyUI-specific lives in this folder. The extra sampling features
+> used by the nodes (`compute_mode`, `full_last_steps`, manual mask, judge preview) live in
+> self-contained samplers here — `spot_qwen_edit.py` / `spot_qwen_edit_plus.py` — which reuse
+> the unchanged judge/attention helpers from the backbone packages. The backbone files
+> (`Qwen_image_edit*/`, `FLUX*/`) are kept identical to `main`.
+
 ## Install
 
 ```bash

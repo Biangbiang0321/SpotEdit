@@ -227,21 +227,10 @@ def generate(
         )
         total_cached_tokens, total_latent_tokens = 0, 0
         ac = 0
-        # judged reuse mask for compute_mode="full" (write-back only, no token slicing)
-        judge_mask = torch.zeros((latent_n), dtype=torch.bool, device=device)
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
-
-                _hyb_full = bool(config.full_last_steps
-                                 and i >= num_inference_steps - config.full_last_steps)
-                if _hyb_full and cache_flags[1].any():
-                    # hybrid schedule: entering the final full-compute window -- park the
-                    # sliced mask so it keeps driving the write-back only
-                    judge_mask = cache_flags[1].clone()
-                    cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
-                    cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
 
                 if i < config.initial_steps or i in config.reset_steps:
                     cache_flags[1] = torch.zeros(
@@ -251,11 +240,10 @@ def generate(
                         (image_n),dtype = torch.bool , device = device
                     )
                     reuse = torch.zeros((latent_n), dtype=torch.bool, device=device)
-                    judge_mask = torch.zeros((latent_n), dtype=torch.bool, device=device)
                     ac = 0
                     ac += 1
                 else:
-                    if config.select_every_step or ac == 1:
+                    if ac == 1:
                         #dilate for stable results; on full-reuse, lower threshold + re-judge
                         H_lat = height // self.vae_scale_factor // 2
                         W_lat = width // self.vae_scale_factor // 2
@@ -265,19 +253,6 @@ def generate(
                                 threshold=config.threshold, method=config.judge_method,
                                 image_size=(height, width), dilation_radius=config.dilation_radius,
                             )
-                        if config.manual_reuse_mask is not None:
-                            _manual = torch.as_tensor(config.manual_reuse_mask,
-                                                      device=device).reshape(-1).bool()
-                            if config.manual_mask_policy == "intersect":
-                                cache_flags[1] = cache_flags[1] & _manual
-                            elif config.manual_mask_policy == "union":
-                                cache_flags[1] = cache_flags[1] | _manual
-                            else:  # "replace"
-                                cache_flags[1] = _manual
-                            if cache_flags[1].all() and config.compute_mode != "full":
-                                # keep at least one token computed (empty-query RoPE crash guard)
-                                cache_flags[1] = cache_flags[1].clone()
-                                cache_flags[1][0] = False
                         if cache_flags[1].any():
                             cache_final = cache_flags[1]
                             cache_flags[2] = torch.ones(
@@ -287,18 +262,6 @@ def generate(
                             cache_flags[2] = torch.zeros(
                                 (image_n),dtype = torch.bool , device = device
                             )
-                        if config.compute_mode == "full" or _hyb_full:
-                            # full-compute: keep feeding every token through the transformer (same
-                            # path as the initial steps); the judged mask only drives the velocity
-                            # write-back below. Quality mode for few-step/distilled models.
-                            judge_mask = cache_flags[1].clone()
-                            cache_flags[1] = torch.zeros((latent_n), dtype=torch.bool, device=device)
-                            cache_flags[2] = torch.zeros((image_n), dtype=torch.bool, device=device)
-                        if config.preview_after_judge:
-                            # interactive preview: stop here and let the standard tail decode the
-                            # x0 draft; aux exposes the judged mask for editing
-                            latents = x0_preds[-1]
-                            break
                     ac += 1
                 cache_flags[-1] = t.item() / 1000
 
@@ -335,9 +298,8 @@ def generate(
                         return_dict=False,
                     )[0]
                 #update the noise prediction only for edited tokens
-                _full = config.compute_mode == "full" or _hyb_full
-                wb_mask = judge_mask if _full else cache_flags[1]
-                if wb_mask.any():
+                if cache_flags[1].any():
+                    uncached_n = cache_flags[1].logical_not().sum().item()
                     if config.reuse_mode == "velocity" and image_latents is not None:
                         # reused (non-edited) tokens flow straight to the source image:
                         # v = (x_t - x0_orig)/sigma  =>  x0_pred = x_t - sigma*v = x0_orig.
@@ -345,13 +307,7 @@ def generate(
                         noisy_copy = (latents - image_latents) / sigma
                     else:
                         noisy_copy = last_noise_pred.clone()
-                    if _full:
-                        # full-compute: predictions cover every token in original order
-                        noisy_copy[:, wb_mask.logical_not()] = \
-                            noise_pred[:, : latents.size(1)][:, wb_mask.logical_not()]
-                    else:
-                        noisy_copy[:, wb_mask.logical_not()] = \
-                            noise_pred[:, : wb_mask.logical_not().sum().item()]
+                    noisy_copy[:, cache_flags[1].logical_not()] = noise_pred[:, :uncached_n]
                     noise_pred = noisy_copy
                 else:
                     noise_pred = noise_pred[:, : latents.size(1)]
