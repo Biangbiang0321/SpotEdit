@@ -63,46 +63,60 @@ app.registerExtension({
 
       function redraw() {
         const cols = getCols(), rows = getRows();
-        const W = cv.width, H = cv.height;
+        // size the backing buffer to the element box (1:1 with CSS px)
+        const boxW = Math.max(1, Math.round(cv.clientWidth || cv.width));
+        const boxH = Math.max(1, Math.round(cv.clientHeight || cv.height));
+        if (cv.width !== boxW) cv.width = boxW;
+        if (cv.height !== boxH) cv.height = boxH;
         const ctx = cv.getContext("2d");
-        ctx.clearRect(0, 0, W, H);
+        ctx.clearRect(0, 0, boxW, boxH);
+        ctx.fillStyle = "#111";
+        ctx.fillRect(0, 0, boxW, boxH);
+        // centered SQUARE draw area (image + grid are square) -> no stretch
+        const side = Math.min(boxW, boxH);
+        const ox = Math.floor((boxW - side) / 2), oy = Math.floor((boxH - side) / 2);
+        node._area = { ox, oy, side };
         if (node._bg && node._bg.complete && node._bg.naturalWidth) {
-          ctx.drawImage(node._bg, 0, 0, W, H);
+          ctx.drawImage(node._bg, ox, oy, side, side);
         } else {
           ctx.fillStyle = "#1b1b1b";
-          ctx.fillRect(0, 0, W, H);
+          ctx.fillRect(ox, oy, side, side);
           ctx.fillStyle = "#888";
-          ctx.font = "13px sans-serif";
-          ctx.fillText("run once to load the draft, then click / drag cells", 12, 24);
+          ctx.font = "12px sans-serif";
+          ctx.fillText("run once to load the draft,", ox + 8, oy + 20);
+          ctx.fillText("then click / drag cells", ox + 8, oy + 38);
         }
-        const cw = W / cols, ch = H / rows;
+        const cw = side / cols, ch = side / rows;
         const g = parseCells(cellsW ? cellsW.value : "", rows, cols);
         ctx.fillStyle = "rgba(255,45,45,0.45)";
         for (let r = 0; r < rows; r++)
           for (let c = 0; c < cols; c++)
-            if (g[r * cols + c]) ctx.fillRect(c * cw, r * ch, cw, ch);
+            if (g[r * cols + c]) ctx.fillRect(ox + c * cw, oy + r * ch, cw, ch);
         if (cols <= 96) {
           ctx.strokeStyle = "rgba(255,255,255,0.12)";
           ctx.lineWidth = 0.5;
           ctx.beginPath();
-          for (let c = 0; c <= cols; c++) { ctx.moveTo(c * cw, 0); ctx.lineTo(c * cw, H); }
-          for (let r = 0; r <= rows; r++) { ctx.moveTo(0, r * ch); ctx.lineTo(W, r * ch); }
+          for (let c = 0; c <= cols; c++) { ctx.moveTo(ox + c * cw, oy); ctx.lineTo(ox + c * cw, oy + side); }
+          for (let r = 0; r <= rows; r++) { ctx.moveTo(ox, oy + r * ch); ctx.lineTo(ox + side, oy + r * ch); }
           ctx.stroke();
         }
         ctx.strokeStyle = "rgba(255,255,255,0.25)";
         ctx.lineWidth = 1;
-        ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
+        ctx.strokeRect(ox + 0.5, oy + 0.5, side - 1, side - 1);
       }
       node._redrawGrid = redraw;
 
       function cellAt(ev) {
         const rect = cv.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return null;
-        const nx = (ev.clientX - rect.left) / rect.width;
-        const ny = (ev.clientY - rect.top) / rect.height;
-        if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null;
-        const c = Math.min(getCols() - 1, Math.max(0, Math.floor(nx * getCols())));
-        const r = Math.min(getRows() - 1, Math.max(0, Math.floor(ny * getRows())));
+        const a = node._area || { ox: 0, oy: 0, side: Math.min(cv.width, cv.height) };
+        // client -> buffer px (buffer == box after redraw, but scale defensively)
+        const sx = cv.width / rect.width, sy = cv.height / rect.height;
+        const lx = (ev.clientX - rect.left) * sx - a.ox;
+        const ly = (ev.clientY - rect.top) * sy - a.oy;
+        if (lx < 0 || ly < 0 || lx > a.side || ly > a.side) return null;
+        const c = Math.min(getCols() - 1, Math.max(0, Math.floor(lx / a.side * getCols())));
+        const r = Math.min(getRows() - 1, Math.max(0, Math.floor(ly / a.side * getRows())));
         return r * getCols() + c;
       }
       function paint(idx, val) {
@@ -140,13 +154,8 @@ app.registerExtension({
       // swallow context menu / wheel so right-drag & scroll don't hit the graph
       cv.addEventListener("contextmenu", (ev) => ev.preventDefault());
 
-      const domWidget = node.addDOMWidget("gridcanvas", "spotedit_grid", cv, {
-        serialize: false,
-        hideOnZoom: false,
-        getMinHeight: () => 260,
-      });
-      if (domWidget) domWidget.computeSize = (w) => [w, Math.max(200, w)];
-
+      // buttons ABOVE the canvas so they are always visible (a tall canvas used
+      // to push them off-screen)
       node.addWidget("button", "reset to judge", null, () => {
         // restore the grid to the judge's auto-suggestion (undo manual edits)
         cellsW.value = node._judgeCells || "";
@@ -162,6 +171,21 @@ app.registerExtension({
         cellsW.value = cellsToStr(g);
         redraw();
       });
+
+      const domWidget = node.addDOMWidget("gridcanvas", "spotedit_grid", cv, {
+        serialize: false,
+        hideOnZoom: false,
+        getMinHeight: () => 220,
+      });
+      // keep the canvas a sensible size (square-ish, capped) so the node isn't
+      // taller than the screen; the drawing letterboxes the square inside the box
+      if (domWidget) domWidget.computeSize = (w) => [w, Math.min(Math.max(200, w), 420)];
+
+      // redraw when the node (and thus the canvas box) is resized
+      if (typeof ResizeObserver !== "undefined") {
+        const ro = new ResizeObserver(() => redraw());
+        try { ro.observe(cv); } catch (e) {}
+      }
 
       node.setSize(node.computeSize());
       setTimeout(redraw, 0);
