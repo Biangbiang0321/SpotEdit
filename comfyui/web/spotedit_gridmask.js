@@ -72,9 +72,11 @@ app.registerExtension({
         ctx.clearRect(0, 0, boxW, boxH);
         ctx.fillStyle = "#111";
         ctx.fillRect(0, 0, boxW, boxH);
-        // centered SQUARE draw area (image + grid are square) -> no stretch
+        // SQUARE draw area (image + grid are square) -> no stretch.
+        // horizontally centered, TOP-aligned so the image sits right under the
+        // buttons instead of floating low when the box is taller than wide.
         const side = Math.min(boxW, boxH);
-        const ox = Math.floor((boxW - side) / 2), oy = Math.floor((boxH - side) / 2);
+        const ox = Math.floor((boxW - side) / 2), oy = 0;
         node._area = { ox, oy, side };
         if (node._bg && node._bg.complete && node._bg.naturalWidth) {
           ctx.drawImage(node._bg, ox, oy, side, side);
@@ -177,9 +179,9 @@ app.registerExtension({
         hideOnZoom: false,
         getMinHeight: () => 220,
       });
-      // keep the canvas a sensible size (square-ish, capped) so the node isn't
-      // taller than the screen; the drawing letterboxes the square inside the box
-      if (domWidget) domWidget.computeSize = (w) => [w, Math.min(Math.max(200, w), 420)];
+      // reserve a square canvas (height == width, capped) so the box matches the
+      // square image and there's no wasted vertical black; drawing top-aligns anyway
+      if (domWidget) domWidget.computeSize = (w) => [w, Math.min(Math.max(200, w), 480)];
 
       // redraw when the node (and thus the canvas box) is resized
       if (typeof ResizeObserver !== "undefined") {
